@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from models import IncomingMessage
 from telegram_sender import TelegramSender, RetryConfig
 from zalo_integration import ZaloManager
+from ai_integration import get_ai_integration
 import os
 import asyncio
 import logging
@@ -337,7 +338,7 @@ EXAMPLES = {
 }
 
 async def process_with_ai(msg: IncomingMessage):
-    """Process incoming message - check if it's an example command or regular message"""
+    """Process incoming message - check if it's an example command or use AI agent"""
     logger.info(f"Processing message from {msg.platform} ({msg.message_type}): {msg.text_content}")
 
     # Check if message is an example command
@@ -362,17 +363,68 @@ async def process_with_ai(msg: IncomingMessage):
                 else:
                     logger.error(f"Example failed: {result.get('error')}")
             else:
-                # Default AI response
-                if msg.message_type == "callback_query":
-                    response_text = f"Button clicked: {msg.text_content}\n\nSend 'help' to see available examples!"
-                else:
-                    response_text = f"AI Response to: {msg.text_content}\n\nTip: Send 'help' to see available examples!"
-
-                result = await sender.send_message(msg.user_id, response_text)
-                if result.get("ok"):
-                    logger.info(f"AI message sent to Telegram: {result}")
-                else:
-                    logger.error(f"Failed to send Telegram message: {result.get('error')}")
+                # Use AI agent for regular messages
+                logger.info(f"[AI Agent] Getting response for user {msg.user_id}: {msg.text_content}")
+                
+                try:
+                    # Get AI agent integration
+                    ai_integration = await get_ai_integration()
+                    
+                    # Get response from AI agent
+                    response_text = await ai_integration.get_response(
+                        int(msg.user_id),
+                        msg.text_content,
+                        timeout=30
+                    )
+                    
+                    logger.info(f"[AI Agent] Response: {response_text[:100]}...")
+                    
+                    # Split message if too long (Telegram limit: 4096)
+                    if len(response_text) > 4090:
+                        # Split by newlines to avoid breaking content
+                        chunks = []
+                        current_chunk = ""
+                        for line in response_text.split('\n'):
+                            if len(current_chunk) + len(line) + 1 > 4090:
+                                if current_chunk:
+                                    chunks.append(current_chunk)
+                                current_chunk = line
+                            else:
+                                current_chunk += ('\n' if current_chunk else '') + line
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                        
+                        # Send each chunk
+                        for i, chunk in enumerate(chunks):
+                            result = await sender.send_message(
+                                msg.user_id,
+                                chunk,
+                                text_mode="markdown"
+                            )
+                            if not result.get("ok"):
+                                logger.error(f"Failed to send chunk {i+1}/{len(chunks)}: {result.get('error')}")
+                            else:
+                                logger.info(f"Chunk {i+1}/{len(chunks)} sent successfully")
+                            # Small delay between chunks
+                            await asyncio.sleep(0.2)
+                    else:
+                        # Send single message
+                        result = await sender.send_message(
+                            msg.user_id,
+                            response_text,
+                            text_mode="markdown"
+                        )
+                        if result.get("ok"):
+                            logger.info(f"AI message sent to Telegram successfully")
+                        else:
+                            logger.error(f"Failed to send AI message: {result.get('error')}")
+                
+                except Exception as e:
+                    logger.error(f"Error getting AI response: {str(e)}")
+                    # Fallback response
+                    fallback_text = f"❌ Error from AI agent: {str(e)[:100]}\n\nSend 'help' to see available examples."
+                    result = await sender.send_message(msg.user_id, fallback_text)
+                    logger.info(f"Fallback message sent: {result}")
 
             sender.close()
         except Exception as e:
