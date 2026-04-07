@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+httpx
+python-dotenv
+requests
+python-telegram-bot
+requests>=2.28.0
+aiohttp>=3.8.0
+pydantic>=2.0.0
+tenacity>=8.0.0  # Retry logic

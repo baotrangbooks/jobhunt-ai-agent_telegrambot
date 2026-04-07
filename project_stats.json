@@ -1,0 +1,188 @@
+{
+  "generated_at": "2026-04-07T09:33:22.126574",
+  "root": "C:\\Users\\Admin\\AI-Projects\\telegram-bot",
+  "files": {
+    ".env": {
+      "size_bytes": 65,
+      "lines": 1,
+      "type": ""
+    },
+    ".env.example": {
+      "size_bytes": 290,
+      "lines": 11,
+      "type": ".example"
+    },
+    ".gitignore": {
+      "size_bytes": 612,
+      "lines": 63,
+      "type": ""
+    },
+    "IMPLEMENTATION_SUMMARY.md": {
+      "size_bytes": 8174,
+      "lines": 300,
+      "type": ".md"
+    },
+    "main.py": {
+      "size_bytes": 258,
+      "lines": 11,
+      "type": ".py"
+    },
+    "models.py": {
+      "size_bytes": 175,
+      "lines": 7,
+      "type": ".py"
+    },
+    "project_analysis.py": {
+      "size_bytes": 5867,
+      "lines": 162,
+      "type": ".py"
+    },
+    "README.md": {
+      "size_bytes": 6757,
+      "lines": 301,
+      "type": ".md"
+    },
+    "requirements.txt": {
+      "size_bytes": 79,
+      "lines": 7,
+      "type": ".txt"
+    },
+    "send.ts": {
+      "size_bytes": 55304,
+      "lines": 1678,
+      "type": ".ts"
+    },
+    "telegram_integration.py": {
+      "size_bytes": 597,
+      "lines": 20,
+      "type": ".py"
+    },
+    "telegram_sender.py": {
+      "size_bytes": 21992,
+      "lines": 609,
+      "type": ".py"
+    },
+    "telegram_sender_example.py": {
+      "size_bytes": 7375,
+      "lines": 200,
+      "type": ".py"
+    },
+    "TELEGRAM_SENDER_README.md": {
+      "size_bytes": 8291,
+      "lines": 361,
+      "type": ".md"
+    },
+    "test_telegram_sender.py": {
+      "size_bytes": 5729,
+      "lines": 175,
+      "type": ".py"
+    },
+    "webhooks.py": {
+      "size_bytes": 2525,
+      "lines": 67,
+      "type": ".py"
+    },
+    "zalo_integration.py": {
+      "size_bytes": 2793,
+      "lines": 78,
+      "type": ".py"
+    }
+  },
+  "summary": {
+    "total_files": 17,
+    "total_lines": 4051,
+    "total_size_kb": 123.9091796875,
+    "python_files": 9,
+    "documentation_files": 3,
+    "config_files": 4
+  },
+  "categories": {
+    "core": [
+      {
+        "name": "models.py",
+        "lines": 7,
+        "size_kb": 0.17
+      },
+      {
+        "name": "telegram_sender.py",
+        "lines": 609,
+        "size_kb": 21.48
+      }
+    ],
+    "integration": [
+      {
+        "name": "telegram_integration.py",
+        "lines": 20,
+        "size_kb": 0.58
+      },
+      {
+        "name": "webhooks.py",
+        "lines": 67,
+        "size_kb": 2.47
+      },
+      {
+        "name": "zalo_integration.py",
+        "lines": 78,
+        "size_kb": 2.73
+      }
+    ],
+    "examples": [
+      {
+        "name": "send.ts",
+        "lines": 1678,
+        "size_kb": 54.01
+      },
+      {
+        "name": "telegram_sender_example.py",
+        "lines": 200,
+        "size_kb": 7.2
+      }
+    ],
+    "documentation": [
+      {
+        "name": "IMPLEMENTATION_SUMMARY.md",
+        "lines": 300,
+        "size_kb": 7.98
+      },
+      {
+        "name": "README.md",
+        "lines": 301,
+        "size_kb": 6.6
+      },
+      {
+        "name": "TELEGRAM_SENDER_README.md",
+        "lines": 361,
+        "size_kb": 8.1
+      }
+    ],
+    "configuration": [
+      {
+        "name": ".env.example",
+        "lines": 11,
+        "size_kb": 0.28
+      },
+      {
+        "name": ".gitignore",
+        "lines": 63,
+        "size_kb": 0.6
+      },
+      {
+        "name": "main.py",
+        "lines": 11,
+        "size_kb": 0.25
+      },
+      {
+        "name": "requirements.txt",
+        "lines": 7,
+        "size_kb": 0.08
+      }
+    ],
+    "testing": [
+      {
+        "name": "test_telegram_sender.py",
+        "lines": 175,
+        "size_kb": 5.59
+      }
+    ]
+  }
+}
