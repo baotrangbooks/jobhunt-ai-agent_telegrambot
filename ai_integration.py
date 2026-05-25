@@ -180,10 +180,10 @@ class AIAgentIntegration:
                                             full_response = content
                                             yield content
 
-                if inspect.iscoroutine(stream_gen):
+                if inspect.isawaitable(stream_gen):
                     stream_gen = await stream_gen
 
-                if inspect.isasyncgen(stream_gen):
+                if hasattr(stream_gen, "__aiter__"):
                     async for chunk in _process_stream(stream_gen):
                         yield chunk
                 else:
