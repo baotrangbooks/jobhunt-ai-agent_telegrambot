@@ -154,41 +154,43 @@ class AIAgentIntegration:
                     recursion_limit=20,
                 )
 
-                async def _process_stream(async_iterable):
-                    nonlocal full_response
-                    async for chunk in async_iterable:
-                        if isinstance(chunk, dict):
-                            for node_name, output in chunk.items():
-                                if "messages" in output and output["messages"]:
-                                    last_msg = output["messages"][-1]
-                                    if hasattr(last_msg, "content") and last_msg.content:
-                                        content = last_msg.content
-                                        if content and content not in full_response:
-                                            full_response = content
-                                            yield content
-
-                def _process_sync(sync_iterable):
-                    nonlocal full_response
-                    for chunk in sync_iterable:
-                        if isinstance(chunk, dict):
-                            for node_name, output in chunk.items():
-                                if "messages" in output and output["messages"]:
-                                    last_msg = output["messages"][-1]
-                                    if hasattr(last_msg, "content") and last_msg.content:
-                                        content = last_msg.content
-                                        if content and content not in full_response:
-                                            full_response = content
-                                            yield content
-
                 if inspect.isawaitable(stream_gen):
                     stream_gen = await stream_gen
 
+                logger.debug(
+                    "[User %s] stream_chat_turn returned type %s, has __aiter__=%s, has __iter__=%s",
+                    user_id,
+                    type(stream_gen),
+                    hasattr(stream_gen, "__aiter__"),
+                    hasattr(stream_gen, "__iter__"),
+                )
+
                 if hasattr(stream_gen, "__aiter__"):
-                    async for chunk in _process_stream(stream_gen):
-                        yield chunk
+                    async for chunk in stream_gen:
+                        if isinstance(chunk, dict):
+                            for node_name, output in chunk.items():
+                                if "messages" in output and output["messages"]:
+                                    last_msg = output["messages"][-1]
+                                    if hasattr(last_msg, "content") and last_msg.content:
+                                        content = last_msg.content
+                                        if content and content not in full_response:
+                                            full_response = content
+                                            yield content
+                elif hasattr(stream_gen, "__iter__"):
+                    for chunk in stream_gen:
+                        if isinstance(chunk, dict):
+                            for node_name, output in chunk.items():
+                                if "messages" in output and output["messages"]:
+                                    last_msg = output["messages"][-1]
+                                    if hasattr(last_msg, "content") and last_msg.content:
+                                        content = last_msg.content
+                                        if content and content not in full_response:
+                                            full_response = content
+                                            yield content
                 else:
-                    for chunk in _process_sync(stream_gen):
-                        yield chunk
+                    raise TypeError(
+                        f"stream_chat_turn returned unsupported type: {type(stream_gen)}"
+                    )
 
             except Exception as stream_error:
                 logger.error(f"Stream error for user {user_id}: {stream_error}")
