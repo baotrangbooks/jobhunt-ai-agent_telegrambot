@@ -41,6 +41,18 @@ else:
         "Set AI_AGENT_ASSISTANT_PATH to the correct path or install the package in the environment."
     )
 
+# Compatibility shim: some versions of ai-agent-assistant import `UTC` from
+# the stdlib `datetime` module (Python 3.11+). On older Python (<3.11)
+# `from datetime import UTC` raises ImportError. Provide a fallback so the
+# package can import when running on older Python versions (temporary).
+try:
+    from datetime import UTC  # type: ignore
+except Exception:
+    import datetime as _dt
+    if not hasattr(_dt, "UTC"):
+        # Use timezone.utc as equivalent
+        _dt.UTC = _dt.timezone.utc
+
 try:
     from ai_agent_assistant import build_local_runtime, stream_chat_turn  # type: ignore[import]
 except ImportError as e:
