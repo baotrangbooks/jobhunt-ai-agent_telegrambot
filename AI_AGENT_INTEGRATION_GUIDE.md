@@ -68,6 +68,8 @@ cd C:\Users\Admin\AI-Projects\ai-agent-assistant
 pip install -e .
 ```
 
+> Nếu bạn deploy lên server và không đặt `ai-agent-assistant` ở vị trí song song với `telegram-bot`, hãy cấu hình biến môi trường `AI_AGENT_ASSISTANT_PATH` trỏ tới thư mục gốc của `ai-agent-assistant`.
+
 ---
 
 ## ⚙️ Cấu hình

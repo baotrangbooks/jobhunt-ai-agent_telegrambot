@@ -14,21 +14,39 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
 # Ensure AI agent assistant is in path
+import os
 import sys
-ai_agent_path = Path(__file__).parent.parent / "ai-agent-assistant"
-if str(ai_agent_path) not in sys.path:
-    sys.path.insert(0, str(ai_agent_path))
+
+logger = logging.getLogger(__name__)
+
+ai_agent_path_env = os.getenv("AI_AGENT_ASSISTANT_PATH")
+if ai_agent_path_env:
+    ai_agent_path = Path(ai_agent_path_env).expanduser().resolve()
+    if ai_agent_path.is_file():
+        ai_agent_path = ai_agent_path.parent
+    if ai_agent_path.name == "ai_agent_assistant":
+        ai_agent_path = ai_agent_path.parent
+else:
+    ai_agent_path = Path(__file__).resolve().parent.parent / "ai-agent-assistant"
+
+if ai_agent_path.exists():
+    if str(ai_agent_path) not in sys.path:
+        sys.path.insert(0, str(ai_agent_path))
+    logger.info(f"Using ai-agent-assistant path: {ai_agent_path}")
+else:
+    logger.warning(
+        f"ai-agent-assistant directory not found at {ai_agent_path}. "
+        "Set AI_AGENT_ASSISTANT_PATH to the correct path or install the package in the environment."
+    )
 
 try:
-    from ai_agent_assistant import build_local_runtime, stream_chat_turn
+    from ai_agent_assistant import build_local_runtime, stream_chat_turn  # type: ignore[import]
 except ImportError as e:
-    logging.warning(f"Could not import ai_agent_assistant: {e}")
+    logger.warning(f"Could not import ai_agent_assistant: {e}")
     build_local_runtime = None
     stream_chat_turn = None
 
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 
 class AIAgentIntegration:
