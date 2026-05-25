@@ -41,10 +41,10 @@ python-dotenv>=1.2.2
 
 ```bash
 # Telegram Bot (dự án hiện tại)
-cd C:\Users\Admin\AI-Projects\telegram-bot
+cd /home/youruser/AI-Projects/telegram-bot
 
 # AI Agent Assistant (nằm song song)
-cd C:\Users\Admin\AI-Projects\ai-agent-assistant
+cd /home/youruser/AI-Projects/ai-agent-assistant
 ```
 
 ### 2. Tạo virtual environment cho Telegram Bot
@@ -52,8 +52,16 @@ cd C:\Users\Admin\AI-Projects\ai-agent-assistant
 ```bash
 cd C:\Users\Admin\AI-Projects\telegram-bot
 python -m venv .venv
-.\.venv\Scripts\activate
 ```
+
+- Windows:
+  ```powershell
+  .\.venv\Scripts\activate
+  ```
+- Ubuntu/Linux:
+  ```bash
+  source .venv/bin/activate
+  ```
 
 ### 3. Cài đặt dependencies
 
@@ -64,11 +72,16 @@ pip install fastapi uvicorn python-telegram-bot langchain-openai langgraph pytho
 ### 4. Cài đặt AI Agent Assistant (nếu chưa có)
 
 ```bash
-cd C:\Users\Admin\AI-Projects\ai-agent-assistant
+cd /home/youruser/AI-Projects/ai-agent-assistant
 pip install -e .
 ```
 
-> Nếu bạn deploy lên server và không đặt `ai-agent-assistant` ở vị trí song song với `telegram-bot`, hãy cấu hình biến môi trường `AI_AGENT_ASSISTANT_PATH` trỏ tới thư mục gốc của `ai-agent-assistant`.
+> Nếu bạn deploy lên server Ubuntu/Linux và `ai-agent-assistant` không nằm song song với `telegram-bot`, cấu hình biến môi trường `AI_AGENT_ASSISTANT_PATH` trỏ tới thư mục gốc của `ai-agent-assistant`.
+
+> Ví dụ trên Ubuntu:
+> ```bash
+> export AI_AGENT_ASSISTANT_PATH="/home/youruser/AI-Projects/ai-agent-assistant"
+> ```
 
 ---
 
@@ -121,13 +134,19 @@ python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(f'Bot
 
 ### Option 1: Chế độ Development (Local)
 
-Chạy webhook server:
+Chạy webhook server trên Ubuntu/Linux:
 
 ```bash
-# Activate venv
-.\.venv\Scripts\activate
+cd /home/youruser/AI-Projects/telegram-bot
+source .venv/bin/activate
+python run.py
+```
 
-# Start server
+Nếu bạn dùng Windows thì:
+
+```powershell
+cd C:\Users\Admin\AI-Projects\telegram-bot
+.\.venv\Scripts\activate
 python run.py
 ```
 
@@ -369,7 +388,7 @@ python telegram_webhook_setup.py
 **Giải pháp:**
 ```bash
 # Xóa file ai_memory.db để reset
-del ai_memory.db
+rm ai_memory.db
 
 # Restart server - sẽ tạo mới
 python run.py

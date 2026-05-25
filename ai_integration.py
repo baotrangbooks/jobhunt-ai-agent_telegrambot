@@ -17,7 +17,8 @@ from langchain_openai import ChatOpenAI
 import os
 import sys
 
-load_dotenv()
+project_root = Path(__file__).resolve().parent
+load_dotenv(dotenv_path=project_root / ".env", override=False)
 logger = logging.getLogger(__name__)
 
 ai_agent_path_env = os.getenv("AI_AGENT_ASSISTANT_PATH")
@@ -46,8 +47,6 @@ except ImportError as e:
     logger.warning(f"Could not import ai_agent_assistant: {e}")
     build_local_runtime = None
     stream_chat_turn = None
-
-load_dotenv()
 
 
 class AIAgentIntegration:
