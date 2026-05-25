@@ -3,6 +3,7 @@ AI Agent Integration Module
 Tích hợp Telegram bot với AI chatbot agent
 """
 
+import inspect
 import sqlite3
 import asyncio
 import logging
@@ -152,20 +153,43 @@ class AIAgentIntegration:
                     stream_mode="updates",
                     recursion_limit=20,
                 )
-                
-                # Process streamed chunks
-                for chunk in stream_gen:
-                    if isinstance(chunk, dict):
-                        # Extract messages from various node outputs
-                        for node_name, output in chunk.items():
-                            if "messages" in output and output["messages"]:
-                                last_msg = output["messages"][-1]
-                                if hasattr(last_msg, "content") and last_msg.content:
-                                    content = last_msg.content
-                                    if content and content not in full_response:
-                                        full_response = content
-                                        yield content
-                
+
+                async def _process_stream(async_iterable):
+                    nonlocal full_response
+                    async for chunk in async_iterable:
+                        if isinstance(chunk, dict):
+                            for node_name, output in chunk.items():
+                                if "messages" in output and output["messages"]:
+                                    last_msg = output["messages"][-1]
+                                    if hasattr(last_msg, "content") and last_msg.content:
+                                        content = last_msg.content
+                                        if content and content not in full_response:
+                                            full_response = content
+                                            yield content
+
+                def _process_sync(sync_iterable):
+                    nonlocal full_response
+                    for chunk in sync_iterable:
+                        if isinstance(chunk, dict):
+                            for node_name, output in chunk.items():
+                                if "messages" in output and output["messages"]:
+                                    last_msg = output["messages"][-1]
+                                    if hasattr(last_msg, "content") and last_msg.content:
+                                        content = last_msg.content
+                                        if content and content not in full_response:
+                                            full_response = content
+                                            yield content
+
+                if inspect.iscoroutine(stream_gen):
+                    stream_gen = await stream_gen
+
+                if inspect.isasyncgen(stream_gen):
+                    async for chunk in _process_stream(stream_gen):
+                        yield chunk
+                else:
+                    for chunk in _process_sync(stream_gen):
+                        yield chunk
+
             except Exception as stream_error:
                 logger.error(f"Stream error for user {user_id}: {stream_error}")
                 yield f"⚠️ Error during streaming: {str(stream_error)}"
