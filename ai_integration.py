@@ -17,6 +17,7 @@ from langchain_openai import ChatOpenAI
 import os
 import sys
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
 ai_agent_path_env = os.getenv("AI_AGENT_ASSISTANT_PATH")
