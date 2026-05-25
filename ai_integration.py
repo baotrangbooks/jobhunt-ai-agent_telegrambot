@@ -81,12 +81,17 @@ class AIAgentIntegration:
 
             # Initialize LLM
             self.llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
-            
+
             # Create or connect to database
             conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            
-            # Build runtime
-            self.app = build_local_runtime(self.llm, conn)
+
+            # Build runtime (may be sync or async depending on ai-agent-assistant version)
+            app_candidate = build_local_runtime(self.llm, conn)
+            if inspect.isawaitable(app_candidate):
+                self.app = await app_candidate
+            else:
+                self.app = app_candidate
+
             self._initialized = True
             
             logger.info("AI agent integration initialized successfully")
