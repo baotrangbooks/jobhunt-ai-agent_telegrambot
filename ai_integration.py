@@ -210,7 +210,17 @@ class AIAgentIntegration:
                             stream_mode="values",
                             recursion_limit=20,
                         )
-                        for chunk in result.get("chunks", []):
+                        # run_chat_turn may be async in some ai-agent-assistant versions
+                        if inspect.isawaitable(result):
+                            result = await result
+
+                        chunks = []
+                        if isinstance(result, dict):
+                            chunks = result.get("chunks", [])
+                        elif isinstance(result, list):
+                            chunks = result
+
+                        for chunk in chunks:
                             if isinstance(chunk, dict):
                                 for node_name, output in chunk.items():
                                     if "messages" in output and output["messages"]:
