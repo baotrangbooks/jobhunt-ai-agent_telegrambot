@@ -43,11 +43,12 @@ else:
     )
 
 try:
-    from ai_agent_assistant import build_local_runtime, stream_chat_turn  # type: ignore[import]
+    from ai_agent_assistant import build_local_runtime, stream_chat_turn, run_chat_turn  # type: ignore[import]
 except ImportError as e:
     logger.warning(f"Could not import ai_agent_assistant: {e}")
     build_local_runtime = None
     stream_chat_turn = None
+    run_chat_turn = None
 
 
 class AIAgentIntegration:
@@ -193,9 +194,46 @@ class AIAgentIntegration:
                     )
 
             except Exception as stream_error:
-                logger.error(f"Stream error for user {user_id}: {stream_error}")
-                yield f"⚠️ Error during streaming: {str(stream_error)}"
-                return
+                logger.warning(
+                    "stream_chat_turn failed for user %s: %s. Falling back to run_chat_turn.",
+                    user_id,
+                    stream_error,
+                )
+                if run_chat_turn is not None:
+                    try:
+                        result = run_chat_turn(
+                            app=self.app,
+                            messages=messages_for_agent,
+                            conversation_id=conversation_id,
+                            run_id=uuid4().hex[:12],
+                            turn_context={"user_id": user_id},
+                            stream_mode="values",
+                            recursion_limit=20,
+                        )
+                        for chunk in result.get("chunks", []):
+                            if isinstance(chunk, dict):
+                                for node_name, output in chunk.items():
+                                    if "messages" in output and output["messages"]:
+                                        last_msg = output["messages"][-1]
+                                        if hasattr(last_msg, "content") and last_msg.content:
+                                            content = last_msg.content
+                                            if content and content not in full_response:
+                                                full_response = content
+                                                yield content
+                    except Exception as fallback_error:
+                        logger.error(
+                            "Fallback run_chat_turn failed for user %s: %s",
+                            user_id,
+                            fallback_error,
+                        )
+                        yield f"⚠️ Error during streaming fallback: {str(fallback_error)}"
+                        return
+                else:
+                    logger.error("run_chat_turn is not available for fallback")
+                    yield f"⚠️ Error during streaming: {str(stream_error)}"
+                    return
+                # if fallback succeeded, continue to post-processing
+                pass
             
             # Add assistant response to history
             if full_response:
