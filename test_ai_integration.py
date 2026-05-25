@@ -3,6 +3,10 @@ Integration Test Script
 Test AI Agent integration with Telegram Bot
 """
 
+# PATCH DATETIME FIRST - before any other imports
+# This fixes compatibility with Python < 3.11 for ai-agent-assistant
+import patch_datetime  # type: ignore
+
 import asyncio
 import sys
 import logging

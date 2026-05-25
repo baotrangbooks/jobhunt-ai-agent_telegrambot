@@ -1,3 +1,7 @@
+# PATCH DATETIME FIRST - before any other imports
+# This fixes compatibility with Python < 3.11 for ai-agent-assistant
+import patch_datetime  # type: ignore
+
 from fastapi import FastAPI, Request
 from models import IncomingMessage
 from telegram_sender import TelegramSender, RetryConfig
