@@ -81,7 +81,7 @@ def main():
     
     # Get server configuration
     host = os.getenv("WEBHOOK_HOST", "0.0.0.0")
-    port = int(os.getenv("WEBHOOK_PORT", "8000"))
+    port = int(os.getenv("WEBHOOK_PORT", "8008"))
     
     logger.info(f"\n📡 Starting webhook server on {host}:{port}")
     logger.info(f"   Webhook URL should be: http://<public_ip>:{port}/webhook/telegram")

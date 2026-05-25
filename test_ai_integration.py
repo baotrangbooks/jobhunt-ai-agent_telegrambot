@@ -99,8 +99,9 @@ async def test_ai_integration():
             logger.info("  ✅ AI integration initialized successfully")
             
             # Get stats
-            stats = ai.get_conversation_stats(test_user_id=999)
+            stats = ai.get_conversation_stats(999)
             logger.info(f"  ✅ Conversation memory ready")
+            logger.info(f"     Stats: {stats}")
             
             logger.info("")
             return True

@@ -94,9 +94,10 @@ class TestTelegramSender:
 
     def test_html_text_rendering(self, sender):
         """Test HTML text conversion"""
-        markdown_text = "**bold** *italic* `code` [link](https://example.com)"
+        markdown_text = "### Header\n**bold** *italic* `code` [link](https://example.com)"
         html = sender._render_html_text(markdown_text)
         
+        assert "<b>Header</b>" in html
         assert "<b>bold</b>" in html
         assert "<i>italic</i>" in html
         assert "<code>code</code>" in html

@@ -3,6 +3,7 @@ import httpx
 import asyncio
 import time
 import re
+import html
 from typing import Optional, Dict, Any, List, Literal, Union
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -34,7 +35,7 @@ class SendOptions:
     reply_to: Optional[int] = None
     buttons: Optional[List[List[Dict[str, str]]]] = None
     silent: bool = False
-    text_mode: Literal["html", "markdown"] = "markdown"
+    text_mode: Optional[Literal["html", "markdown", "markdownv2"]] = "markdown"
     force_document: bool = False
     parse_mode: Optional[str] = None
 
@@ -64,6 +65,13 @@ class TelegramSender:
         self.rate_limiter = RateLimiter()
         self.session = requests.Session()
         self.chat_id_cache: Dict[str, str] = {}
+
+    def close(self) -> None:
+        """Close the underlying HTTP session."""
+        try:
+            self.session.close()
+        except Exception:
+            pass
 
     def _resolve_token(self, token: Optional[str]) -> str:
         """Resolve token from parameter or instance"""
@@ -170,18 +178,36 @@ class TelegramSender:
             raise ValueError(f"Failed to download media from {media_url}: {str(e)}")
 
     def _render_html_text(self, text: str) -> str:
-        """Convert markdown-like text to HTML"""
-        # Simple markdown to HTML conversion
-        html = text
-        # Bold: **text** → <b>text</b>
-        html = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', html)
-        # Italic: *text* → <i>text</i>
-        html = re.sub(r'(?<!\*)\*(.+?)\*(?!\*)', r'<i>\1</i>', html)
-        # Code: `text` → <code>text</code>
-        html = re.sub(r'`(.+?)`', r'<code>\1</code>', html)
+        """Convert markdown-like text to HTML for Telegram HTML parse mode."""
+        # Escape any HTML special characters first
+        escaped = html.escape(text)
+
+        # Headings: ###, ##, # → bold text
+        escaped = re.sub(r'(?m)^(#{1,6})\s*(.+)$', r'<b>\2</b>', escaped)
+
         # Links: [text](url) → <a href="url">text</a>
-        html = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', html)
-        return html
+        def _link_repl(match: re.Match) -> str:
+            label = match.group(1)
+            url = match.group(2)
+            return f'<a href="{html.escape(url, quote=True)}">{label}</a>'
+        escaped = re.sub(r'\[(.+?)\]\((.+?)\)', _link_repl, escaped)
+
+        # Code blocks: ```code``` → <pre><code>code</code></pre>
+        def _code_block_repl(match: re.Match) -> str:
+            content = match.group(1)
+            return f'<pre><code>{html.escape(content)}</code></pre>'
+        escaped = re.sub(r'```(.+?)```', _code_block_repl, escaped, flags=re.S)
+
+        # Inline code: `text` → <code>text</code>
+        escaped = re.sub(r'`(.+?)`', lambda m: f'<code>{html.escape(m.group(1))}</code>', escaped)
+
+        # Bold: **text** → <b>text</b>
+        escaped = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', escaped)
+
+        # Italic: *text* → <i>text</i>
+        escaped = re.sub(r'(?<!\*)\*(.+?)\*(?!\*)', r'<i>\1</i>', escaped)
+
+        return escaped
 
     async def send_message(
         self,
@@ -214,11 +240,22 @@ class TelegramSender:
                 if options.silent:
                     params["disable_notification"] = True
                 
-                # Add parse mode
-                if options.text_mode == "html":
-                    params["parse_mode"] = "HTML"
-                else:
-                    params["parse_mode"] = "Markdown"
+                # Add parse mode and optional HTML rendering
+                parse_mode = None
+                if options.parse_mode:
+                    parse_mode = options.parse_mode
+                elif options.text_mode:
+                    if options.text_mode == "html":
+                        parse_mode = "HTML"
+                    elif options.text_mode == "markdown":
+                        parse_mode = "Markdown"
+                    elif options.text_mode == "markdownv2":
+                        parse_mode = "MarkdownV2"
+
+                if parse_mode:
+                    params["parse_mode"] = parse_mode
+                    if parse_mode.upper() == "HTML":
+                        params["text"] = self._render_html_text(params["text"])
                 
                 # Add thread_id if provided
                 if options.thread_id:
@@ -381,10 +418,13 @@ class TelegramSender:
             }
             
             # Add parse mode
-            if options.text_mode == "html":
-                params["parse_mode"] = "HTML"
-            else:
-                params["parse_mode"] = "Markdown"
+            if options.parse_mode:
+                params["parse_mode"] = options.parse_mode
+            elif options.text_mode:
+                if options.text_mode == "html":
+                    params["parse_mode"] = "HTML"
+                else:
+                    params["parse_mode"] = "Markdown"
             
             # Add buttons if provided
             if options.buttons:

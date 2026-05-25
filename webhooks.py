@@ -399,7 +399,7 @@ async def process_with_ai(msg: IncomingMessage):
                             result = await sender.send_message(
                                 msg.user_id,
                                 chunk,
-                                text_mode="markdown"
+                                text_mode="html"
                             )
                             if not result.get("ok"):
                                 logger.error(f"Failed to send chunk {i+1}/{len(chunks)}: {result.get('error')}")
@@ -408,11 +408,11 @@ async def process_with_ai(msg: IncomingMessage):
                             # Small delay between chunks
                             await asyncio.sleep(0.2)
                     else:
-                        # Send single message
+                        # Send single message using Telegram HTML parse mode
                         result = await sender.send_message(
                             msg.user_id,
                             response_text,
-                            text_mode="markdown"
+                            text_mode="html"
                         )
                         if result.get("ok"):
                             logger.info(f"AI message sent to Telegram successfully")
@@ -423,7 +423,7 @@ async def process_with_ai(msg: IncomingMessage):
                     logger.error(f"Error getting AI response: {str(e)}")
                     # Fallback response
                     fallback_text = f"❌ Error from AI agent: {str(e)[:100]}\n\nSend 'help' to see available examples."
-                    result = await sender.send_message(msg.user_id, fallback_text)
+                    result = await sender.send_message(msg.user_id, fallback_text, text_mode=None)
                     logger.info(f"Fallback message sent: {result}")
 
             sender.close()
