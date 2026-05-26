@@ -7,6 +7,7 @@ from models import IncomingMessage
 from telegram_sender import TelegramSender, RetryConfig
 from zalo_integration import ZaloManager
 from ai_integration import get_ai_integration
+from uuid import uuid4
 import os
 import asyncio
 import logging
@@ -371,21 +372,24 @@ async def process_with_ai(msg: IncomingMessage):
                 logger.info(f"[AI Agent] Getting response for user {msg.user_id}: {msg.text_content}")
                 
                 try:
-                    # Get AI agent integration
                     ai_integration = await get_ai_integration()
-                    
-                    # Get response from AI agent
-                    response_text = await ai_integration.get_response(
-                        int(msg.user_id),
-                        msg.text_content,
-                        timeout=30
+                    conversation_id = f"telegram:{msg.user_id}"
+                    ai_integration.ensure_telegram_user(str(msg.user_id))
+                    ai_integration.ensure_conversation(conversation_id, str(msg.user_id))
+                    ai_integration.add_message(conversation_id, "user", msg.text_content, message_type=msg.message_type or "text")
+
+                    history = ai_integration.load_conversation_history(conversation_id)
+                    response_text, events = await ai_integration.run_turn(
+                        conversation_uuid=conversation_id,
+                        run_uuid=uuid4().hex[:12],
+                        user_id=str(msg.user_id),
+                        messages=history,
+                        metadata={"user_profile": {"channel": "telegram", "telegram_chat_id": str(msg.user_id)}},
                     )
-                    
+
                     logger.info(f"[AI Agent] Response: {response_text[:100]}...")
                     
-                    # Split message if too long (Telegram limit: 4096)
                     if len(response_text) > 4090:
-                        # Split by newlines to avoid breaking content
                         chunks = []
                         current_chunk = ""
                         for line in response_text.split('\n'):
@@ -397,8 +401,7 @@ async def process_with_ai(msg: IncomingMessage):
                                 current_chunk += ('\n' if current_chunk else '') + line
                         if current_chunk:
                             chunks.append(current_chunk)
-                        
-                        # Send each chunk
+
                         for i, chunk in enumerate(chunks):
                             result = await sender.send_message(
                                 msg.user_id,
@@ -409,10 +412,8 @@ async def process_with_ai(msg: IncomingMessage):
                                 logger.error(f"Failed to send chunk {i+1}/{len(chunks)}: {result.get('error')}")
                             else:
                                 logger.info(f"Chunk {i+1}/{len(chunks)} sent successfully")
-                            # Small delay between chunks
                             await asyncio.sleep(0.2)
                     else:
-                        # Send single message using Telegram HTML parse mode
                         result = await sender.send_message(
                             msg.user_id,
                             response_text,
@@ -425,7 +426,6 @@ async def process_with_ai(msg: IncomingMessage):
                 
                 except Exception as e:
                     logger.error(f"Error getting AI response: {str(e)}")
-                    # Fallback response
                     fallback_text = f"❌ Error from AI agent: {str(e)[:100]}\n\nSend 'help' to see available examples."
                     result = await sender.send_message(msg.user_id, fallback_text, text_mode=None)
                     logger.info(f"Fallback message sent: {result}")
