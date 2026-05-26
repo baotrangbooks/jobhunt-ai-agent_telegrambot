@@ -1,102 +1,48 @@
-"""
-Job Search Provider for Telegram Bot
-Mock implementation for job search functionality
-"""
+from __future__ import annotations
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-# Mock job database
-MOCK_JOBS = [
-    {
-        "id": "job_001",
-        "title": "Python Developer",
-        "company": "Tech Corp",
-        "location": "Ho Chi Minh City",
-        "salary": "$2000 - $3000",
-        "description": "Looking for experienced Python developers to build AI solutions.",
-    },
-    {
-        "id": "job_002",
-        "title": "Full Stack Developer",
-        "company": "StartupXYZ",
-        "location": "Hanoi",
-        "salary": "$1500 - $2500",
-        "description": "Join our team to develop web applications with FastAPI and React.",
-    },
-    {
-        "id": "job_003",
-        "title": "Data Scientist",
-        "company": "DataCorp",
-        "location": "Da Nang",
-        "salary": "$2500 - $3500",
-        "description": "Help us build machine learning models to analyze user behavior.",
-    },
-    {
-        "id": "job_004",
-        "title": "DevOps Engineer",
-        "company": "CloudInc",
-        "location": "Ho Chi Minh City, Hanoi",
-        "salary": "$2000 - $3000",
-        "description": "Manage and optimize our Kubernetes infrastructure on AWS.",
-    },
-]
+def _tool_args_preview(tool_args: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(tool_args or {})
+    return {
+        "query": str(payload.get("query", "")),
+        "location": str(payload.get("location", "")),
+        "location_norm": str(payload.get("location_norm", "")),
+        "origin_address": str(payload.get("origin_address", "")),
+        "origin_lat": payload.get("origin_lat"),
+        "origin_lng": payload.get("origin_lng"),
+        "radius_km": payload.get("radius_km"),
+        "job_title": str(payload.get("job_title", "")),
+        "salary_min": payload.get("salary_min"),
+        "skills_count": len(payload.get("skills", []) or []),
+        "keys": sorted(payload.keys()),
+    }
 
 
-async def search_jobs(
-    query: str = "",
-    location: Optional[str] = None,
-    salary_min: Optional[float] = None,
-    salary_max: Optional[float] = None,
-    **kwargs: Any,
-) -> List[Dict[str, Any]]:
-    """
-    Search for jobs based on criteria.
+def search_jobs_from_supabase_catalog(
+    *,
+    query: str,
+    limit: int = 5,
+    tool_args: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Telegram bot job provider using the same Supabase catalog as FastAPI."""
 
-    Args:
-        query: Job title or keywords to search
-        location: Job location
-        salary_min: Minimum salary
-        salary_max: Maximum salary
-        **kwargs: Additional filters
+    from core.supabase_jobs import search_job_database_structured
 
-    Returns:
-        List of matching jobs
-    """
-    logger.info(f"Searching jobs: query={query}, location={location}")
-
-    results = []
-    query_lower = query.lower() if query else ""
-
-    for job in MOCK_JOBS:
-        # Filter by query (title/description)
-        if query_lower and query_lower not in job["title"].lower() and query_lower not in job["description"].lower():
-            continue
-
-        # Filter by location
-        if location and location.lower() not in job["location"].lower():
-            continue
-
-        results.append(job)
-
-    logger.info(f"Found {len(results)} jobs matching criteria")
-    return results
-
-
-async def get_job_details(job_id: str) -> Optional[Dict[str, Any]]:
-    """Get detailed information about a specific job."""
-    for job in MOCK_JOBS:
-        if job["id"] == job_id:
-            return job
-    return None
+    result = search_job_database_structured(query=query, limit=limit, tool_args=tool_args)
+    logger.info(
+        "telegram_job_search query=%r limit=%s tool_args=%s rows=%s",
+        query,
+        limit,
+        _tool_args_preview(tool_args),
+        len(result.get("rows", [])) if isinstance(result, dict) else 0,
+    )
+    return result
 
 
 def configure_for_agent() -> callable:
-    """
-    Get the configured job search function for the AI agent.
-    This should be called to configure the agent with job search capabilities.
-    """
-    return search_jobs
+    return search_jobs_from_supabase_catalog

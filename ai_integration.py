@@ -16,10 +16,12 @@ from uuid import uuid4
 from typing import AsyncGenerator, Callable, Optional, List, Dict, Any, Tuple, Union
 
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
 
 project_root = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=project_root / ".env", override=False)
+backend_env_path = project_root.parent / "FastAPI-boilerplate" / "src" / ".env"
+if backend_env_path.exists():
+    load_dotenv(dotenv_path=backend_env_path, override=False)
 logger = logging.getLogger(__name__)
 
 AI_AGENT_ENV_VARS = ["AI_AGENT_ASSISTANT_PATH", "AI_ASSISTANT_PATH"]
@@ -34,8 +36,14 @@ def _resolve_ai_agent_path() -> Path:
                 candidate = candidate.parent
             if candidate.name == "ai_agent_assistant":
                 candidate = candidate.parent
-            return candidate
-    return Path(__file__).resolve().parent.parent / "ai-agent-assistant"
+            if (candidate / "ai_agent_assistant" / "__init__.py").exists():
+                return candidate
+            logger.warning(f"Ignoring invalid {env_var}: {candidate}")
+
+    workspace_candidate = Path(__file__).resolve().parent.parent / "ai-agent-assistant"
+    if (workspace_candidate / "ai_agent_assistant" / "__init__.py").exists():
+        return workspace_candidate
+    return workspace_candidate
 
 
 def _ensure_ai_agent_in_path() -> None:
@@ -169,6 +177,19 @@ def configure_job_search_provider(provider: Callable[..., Any]) -> None:
     configure_job_search_provider_fn(provider)
 
 
+def _configure_default_job_search_provider() -> None:
+    if configure_job_search_provider_fn is None:
+        logger.warning("configure_job_search_provider is not available in ai_agent_assistant")
+        return
+    try:
+        from job_search_provider import search_jobs_from_supabase_catalog
+
+        configure_job_search_provider_fn(search_jobs_from_supabase_catalog)
+        logger.info("Configured Telegram bot job search provider with Supabase catalog")
+    except Exception as exc:
+        logger.error(f"Failed to configure Telegram job search provider: {exc}")
+
+
 class AIAgentIntegration:
     """Manages integration between Telegram bot and AI chatbot agent."""
 
@@ -185,7 +206,13 @@ class AIAgentIntegration:
                 logger.error("AI agent runtime builder not available")
                 return False
 
-            self.llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+            _configure_default_job_search_provider()
+
+            from langchain_openai import ChatOpenAI
+
+            model = os.getenv("AI_ASSISTANT_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+            temperature = float(os.getenv("AI_ASSISTANT_TEMPERATURE", "0"))
+            self.llm = ChatOpenAI(model=model, temperature=temperature)
             self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self.conn.row_factory = sqlite3.Row
             self._initialize_database()
