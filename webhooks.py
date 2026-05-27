@@ -435,7 +435,7 @@ async def process_with_ai(msg: IncomingMessage):
         except Exception as e:
             logger.error(f"Error processing Telegram message: {str(e)}")
     
-    elif msg.platform == "zalo" and zalo_manager:
+    elif msg.platform == "zalo":
         try:
             logger.info(f"[AI Agent][Zalo] Getting response for user {msg.user_id}: {msg.text_content}")
             ai_integration = await get_ai_integration()
@@ -452,10 +452,14 @@ async def process_with_ai(msg: IncomingMessage):
                 messages=history,
                 metadata={"user_profile": {"channel": "zalo", "zalo_user_id": str(msg.user_id)}},
             )
+            logger.info(f"[AI Agent][Zalo] Response: {response_text[:100]}...")
+            if not zalo_manager:
+                logger.error("Cannot send Zalo response: ZaloManager is not initialized. Check ZALO_APP_ID/ZALO_APP_SECRET.")
+                return
             await zalo_manager.send_zalo_message(msg.user_id, response_text)
             logger.info(f"Message sent to Zalo: {msg.user_id}")
         except Exception as e:
-            logger.error(f"Error sending Zalo message: {str(e)}")
+            logger.error(f"Error processing Zalo message: {str(e)}")
 
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
