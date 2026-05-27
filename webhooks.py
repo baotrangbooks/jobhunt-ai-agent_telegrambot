@@ -11,6 +11,7 @@ from uuid import uuid4
 import os
 import asyncio
 import logging
+import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -436,7 +437,21 @@ async def process_with_ai(msg: IncomingMessage):
     
     elif msg.platform == "zalo" and zalo_manager:
         try:
-            response_text = f"Zalo Response to: {msg.text_content}"
+            logger.info(f"[AI Agent][Zalo] Getting response for user {msg.user_id}: {msg.text_content}")
+            ai_integration = await get_ai_integration()
+            conversation_id = f"zalo:{msg.user_id}"
+            ai_integration.ensure_telegram_user(f"zalo:{msg.user_id}", internal_user_id=f"zalo_{msg.user_id}")
+            ai_integration.ensure_conversation(conversation_id, f"zalo:{msg.user_id}")
+            ai_integration.add_message(conversation_id, "user", msg.text_content, message_type=msg.message_type or "text")
+
+            history = ai_integration.load_conversation_history(conversation_id)
+            response_text, events = await ai_integration.run_turn(
+                conversation_uuid=conversation_id,
+                run_uuid=uuid4().hex[:12],
+                user_id=f"zalo:{msg.user_id}",
+                messages=history,
+                metadata={"user_profile": {"channel": "zalo", "zalo_user_id": str(msg.user_id)}},
+            )
             await zalo_manager.send_zalo_message(msg.user_id, response_text)
             logger.info(f"Message sent to Zalo: {msg.user_id}")
         except Exception as e:
@@ -537,10 +552,18 @@ async def zalo_webhook(request: Request):
     data = await request.json()
     parsed = _parse_zalo_webhook_payload(data)
     if parsed is None:
-        logger.info(f"Ignored Zalo webhook event: keys={list(data.keys())}, event={data.get('event_name') or data.get('event')}")
+        logger.info(
+            "Ignored Zalo webhook event: "
+            f"event={data.get('event_name') or data.get('event')}, "
+            f"payload={_compact_json(data)}"
+        )
         return {"status": "ignored"}
 
     user_id, text, message_type = parsed
+    logger.info(
+        "Parsed Zalo webhook: "
+        f"user_id={user_id}, message_type={message_type}, text_preview={text[:120]!r}, payload={_compact_json(data)}"
+    )
     msg = IncomingMessage(user_id=user_id, text_content=text, platform="zalo", message_type=message_type)
     await process_with_ai(msg)
     return {"status": "ok"}
@@ -550,16 +573,28 @@ def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
     """Extract a user text message from common Zalo OA webhook payload shapes."""
     sender = data.get("sender") if isinstance(data.get("sender"), dict) else {}
     message = data.get("message") if isinstance(data.get("message"), dict) else {}
+    message_sender = message.get("sender") if isinstance(message.get("sender"), dict) else {}
+    message_from = message.get("from") if isinstance(message.get("from"), dict) else {}
 
     user_id = (
         sender.get("id")
         or sender.get("user_id")
+        or message_sender.get("id")
+        or message_sender.get("user_id")
+        or message_from.get("id")
+        or message_from.get("user_id")
+        or message.get("from_id")
+        or message.get("user_id")
+        or message.get("uid")
+        or message.get("sender_id")
         or data.get("user_id")
         or data.get("from_user_id")
         or data.get("uid")
     )
     text = (
         message.get("text")
+        or message.get("content")
+        or message.get("message")
         or data.get("text")
         or data.get("message_text")
         or data.get("content")
@@ -573,3 +608,13 @@ def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
 
     message_type = str(data.get("event_name") or data.get("event") or "zalo_message")
     return str(user_id), str(text), message_type
+
+
+def _compact_json(data: dict, *, max_chars: int = 2000) -> str:
+    try:
+        text = json.dumps(data, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(data)
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3] + "..."
