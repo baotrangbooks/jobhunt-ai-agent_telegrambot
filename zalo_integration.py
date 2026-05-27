@@ -7,13 +7,15 @@ from typing import Optional
 TOKEN_FILE = "tokens.json"
 
 class ZaloManager:
-    def __init__(self, app_id: str, app_secret: str):
+    def __init__(self, app_id: str = "", app_secret: str = "", bot_token: str = ""):
         self.app_id = app_id
         self.app_secret = app_secret
+        self.bot_token = bot_token
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.expires_at: Optional[datetime] = None
-        self.load_tokens()
+        if not self.bot_token:
+            self.load_tokens()
 
     def load_tokens(self):
         if os.path.exists(TOKEN_FILE):
@@ -60,6 +62,9 @@ class ZaloManager:
             self.save_tokens()
 
     async def send_zalo_message(self, user_id: str, text: str):
+        if self.bot_token:
+            return await self.send_zalo_bot_message(user_id, text)
+
         await self.refresh_token_if_needed()
 
         url = f"https://openapi.zalo.me/v2.0/oa/message?access_token={self.access_token}"
@@ -74,5 +79,17 @@ class ZaloManager:
 
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+
+    async def send_zalo_bot_message(self, chat_id: str, text: str):
+        url = f"https://bot-api.zaloplatforms.com/bot{self.bot_token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
             response.raise_for_status()
             return response.json()

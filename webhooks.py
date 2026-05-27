@@ -23,9 +23,12 @@ async def root():
     return {"message": "AI Chatbot Backend is running!"}
 
 # Initialize Zalo Manager
+zalo_bot_token = os.getenv("ZALO_BOT_TOKEN")
 zalo_app_id = os.getenv("ZALO_APP_ID")
 zalo_app_secret = os.getenv("ZALO_APP_SECRET")
-if zalo_app_id and zalo_app_secret:
+if zalo_bot_token:
+    zalo_manager = ZaloManager(bot_token=zalo_bot_token)
+elif zalo_app_id and zalo_app_secret:
     zalo_manager = ZaloManager(zalo_app_id, zalo_app_secret)
 else:
     zalo_manager = None
@@ -454,7 +457,7 @@ async def process_with_ai(msg: IncomingMessage):
             )
             logger.info(f"[AI Agent][Zalo] Response: {response_text[:100]}...")
             if not zalo_manager:
-                logger.error("Cannot send Zalo response: ZaloManager is not initialized. Check ZALO_APP_ID/ZALO_APP_SECRET.")
+                logger.error("Cannot send Zalo response: ZaloManager is not initialized. Check ZALO_BOT_TOKEN.")
                 return
             await zalo_manager.send_zalo_message(msg.user_id, response_text)
             logger.info(f"Message sent to Zalo: {msg.user_id}")
@@ -579,9 +582,11 @@ def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
     message = data.get("message") if isinstance(data.get("message"), dict) else {}
     message_sender = message.get("sender") if isinstance(message.get("sender"), dict) else {}
     message_from = message.get("from") if isinstance(message.get("from"), dict) else {}
+    message_chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}
 
     user_id = (
-        sender.get("id")
+        message_chat.get("id")
+        or sender.get("id")
         or sender.get("user_id")
         or message_sender.get("id")
         or message_sender.get("user_id")
