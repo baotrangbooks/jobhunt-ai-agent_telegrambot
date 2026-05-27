@@ -12,12 +12,15 @@ import os
 import asyncio
 import logging
 import json
+import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 bot_notify_secret = os.getenv("BOT_NOTIFY_SECRET", "")
+JOB_REDIRECT_URL_RE = re.compile(r"(https://bottimviec\.ai/jobs/redirect\?[^\s)]+|/jobs/redirect\?[^\s)]+)")
 
 @app.get("/")
 async def root():
@@ -33,6 +36,25 @@ elif zalo_app_id and zalo_app_secret:
     zalo_manager = ZaloManager(zalo_app_id, zalo_app_secret)
 else:
     zalo_manager = None
+
+
+def add_bot_tracking_to_job_redirects(
+    text: str,
+    *,
+    channel: str,
+    chat_id: str,
+    conversation_id: str,
+) -> str:
+    def replace(match: re.Match[str]) -> str:
+        url = match.group(1)
+        parts = urlsplit(url)
+        params = dict(parse_qsl(parts.query, keep_blank_values=True))
+        params.setdefault("channel", channel)
+        params.setdefault("chat_id", str(chat_id))
+        params.setdefault("conversation_id", conversation_id)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+
+    return JOB_REDIRECT_URL_RE.sub(replace, text)
 
 # ============ Example Handlers ============
 
@@ -391,6 +413,12 @@ async def process_with_ai(msg: IncomingMessage):
                         messages=history,
                         metadata={"user_profile": {"channel": "telegram", "telegram_chat_id": str(msg.user_id)}},
                     )
+                    response_text = add_bot_tracking_to_job_redirects(
+                        response_text,
+                        channel="telegram",
+                        chat_id=msg.user_id,
+                        conversation_id=conversation_id,
+                    )
 
                     logger.info(f"[AI Agent] Response: {response_text[:100]}...")
                     
@@ -455,6 +483,12 @@ async def process_with_ai(msg: IncomingMessage):
                 user_id=f"zalo:{msg.user_id}",
                 messages=history,
                 metadata={"user_profile": {"channel": "zalo", "zalo_user_id": str(msg.user_id)}},
+            )
+            response_text = add_bot_tracking_to_job_redirects(
+                response_text,
+                channel="zalo",
+                chat_id=msg.user_id,
+                conversation_id=conversation_id,
             )
             logger.info(f"[AI Agent][Zalo] Response: {response_text[:100]}...")
             if not zalo_manager:
