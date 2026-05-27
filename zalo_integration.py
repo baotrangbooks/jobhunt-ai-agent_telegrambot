@@ -1,10 +1,12 @@
 import httpx
 import json
 import os
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
 TOKEN_FILE = "tokens.json"
+logger = logging.getLogger(__name__)
 
 class ZaloManager:
     def __init__(self, app_id: str = "", app_secret: str = "", bot_token: str = ""):
@@ -92,4 +94,9 @@ class ZaloManager:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            logger.info(
+                "Zalo Bot API sendMessage response: "
+                f"chat_id={chat_id}, status={response.status_code}, body={data}"
+            )
+            return data

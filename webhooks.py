@@ -459,8 +459,8 @@ async def process_with_ai(msg: IncomingMessage):
             if not zalo_manager:
                 logger.error("Cannot send Zalo response: ZaloManager is not initialized. Check ZALO_BOT_TOKEN.")
                 return
-            await zalo_manager.send_zalo_message(msg.user_id, response_text)
-            logger.info(f"Message sent to Zalo: {msg.user_id}")
+            send_result = await zalo_manager.send_zalo_message(msg.user_id, response_text)
+            logger.info(f"Message sent to Zalo chat_id={msg.user_id}, result={send_result}")
         except Exception as e:
             logger.error(f"Error processing Zalo message: {str(e)}")
 
