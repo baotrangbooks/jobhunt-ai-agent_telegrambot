@@ -535,9 +535,41 @@ async def telegram_webhook(request: Request):
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request):
     data = await request.json()
-    # Assuming Zalo webhook payload has 'sender' and 'message'
-    user_id = data['sender']['id']
-    text = data['message']['text']
-    msg = IncomingMessage(user_id=user_id, text_content=text, platform="zalo")
+    parsed = _parse_zalo_webhook_payload(data)
+    if parsed is None:
+        logger.info(f"Ignored Zalo webhook event: keys={list(data.keys())}, event={data.get('event_name') or data.get('event')}")
+        return {"status": "ignored"}
+
+    user_id, text, message_type = parsed
+    msg = IncomingMessage(user_id=user_id, text_content=text, platform="zalo", message_type=message_type)
     await process_with_ai(msg)
     return {"status": "ok"}
+
+
+def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
+    """Extract a user text message from common Zalo OA webhook payload shapes."""
+    sender = data.get("sender") if isinstance(data.get("sender"), dict) else {}
+    message = data.get("message") if isinstance(data.get("message"), dict) else {}
+
+    user_id = (
+        sender.get("id")
+        or sender.get("user_id")
+        or data.get("user_id")
+        or data.get("from_user_id")
+        or data.get("uid")
+    )
+    text = (
+        message.get("text")
+        or data.get("text")
+        or data.get("message_text")
+        or data.get("content")
+    )
+
+    if not text and isinstance(message.get("attachments"), list) and message["attachments"]:
+        text = "[Zalo attachment]"
+
+    if not user_id or not text:
+        return None
+
+    message_type = str(data.get("event_name") or data.get("event") or "zalo_message")
+    return str(user_id), str(text), message_type
