@@ -293,6 +293,23 @@ class AIAgentIntegration:
             return {"telegram_chat_id": row["telegram_chat_id"], "internal_user_id": row["internal_user_id"]}
         return None
 
+    def list_known_chat_ids(self) -> Dict[str, List[str]]:
+        """Return known Telegram/Zalo chat IDs that have interacted with the bot."""
+        if self.conn is None:
+            raise RuntimeError("Database connection is not initialized")
+        cursor = self.conn.execute("SELECT telegram_chat_id FROM telegram_users ORDER BY created_at ASC")
+        telegram_ids: List[str] = []
+        zalo_ids: List[str] = []
+        for row in cursor.fetchall():
+            chat_id = str(row["telegram_chat_id"] or "").strip()
+            if not chat_id:
+                continue
+            if chat_id.startswith("zalo:"):
+                zalo_ids.append(chat_id.removeprefix("zalo:"))
+            else:
+                telegram_ids.append(chat_id)
+        return {"telegram": telegram_ids, "zalo": zalo_ids}
+
     def ensure_conversation(self, conversation_id: str, telegram_chat_id: str) -> None:
         if self.conn is None:
             raise RuntimeError("Database connection is not initialized")

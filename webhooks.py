@@ -2,7 +2,7 @@
 # This fixes compatibility with Python < 3.11 for ai-agent-assistant
 import patch_datetime  # type: ignore
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from models import IncomingMessage
 from telegram_sender import TelegramSender, RetryConfig
 from zalo_integration import ZaloManager
@@ -17,6 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+bot_notify_secret = os.getenv("BOT_NOTIFY_SECRET", "")
 
 @app.get("/")
 async def root():
@@ -576,6 +577,63 @@ async def zalo_webhook(request: Request):
     return {"status": "ok"}
 
 
+@app.post("/internal/job-notifications")
+async def internal_job_notification(request: Request):
+    if bot_notify_secret:
+        received_secret = request.headers.get("x-bot-notify-secret", "")
+        if received_secret != bot_notify_secret:
+            raise HTTPException(status_code=401, detail="Invalid notification secret")
+
+    payload = await request.json()
+    job = payload.get("job") if isinstance(payload.get("job"), dict) else {}
+    text = _format_job_notification(job)
+    ai_integration = await get_ai_integration()
+    recipients = ai_integration.list_known_chat_ids()
+
+    telegram_sent = 0
+    telegram_failed = 0
+    zalo_sent = 0
+    zalo_failed = 0
+
+    telegram_ids = recipients.get("telegram", [])
+    if telegram_ids:
+        sender = TelegramSender()
+        try:
+            for chat_id in telegram_ids:
+                result = await sender.send_message(chat_id, text, text_mode=None)
+                if result.get("ok"):
+                    telegram_sent += 1
+                else:
+                    telegram_failed += 1
+                    logger.error(f"Failed to send Telegram job notification to {chat_id}: {result}")
+        finally:
+            sender.close()
+
+    if zalo_manager:
+        for chat_id in recipients.get("zalo", []):
+            try:
+                result = await zalo_manager.send_zalo_message(chat_id, text)
+                if result.get("ok"):
+                    zalo_sent += 1
+                else:
+                    zalo_failed += 1
+                    logger.error(f"Failed to send Zalo job notification to {chat_id}: {result}")
+            except Exception as exc:
+                zalo_failed += 1
+                logger.error(f"Failed to send Zalo job notification to {chat_id}: {exc}")
+    elif recipients.get("zalo"):
+        zalo_failed = len(recipients.get("zalo", []))
+        logger.error("Cannot send Zalo job notifications: ZaloManager is not initialized.")
+
+    return {
+        "status": "ok",
+        "telegram_sent": telegram_sent,
+        "telegram_failed": telegram_failed,
+        "zalo_sent": zalo_sent,
+        "zalo_failed": zalo_failed,
+    }
+
+
 def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
     """Extract a user text message from common Zalo OA webhook payload shapes."""
     sender = data.get("sender") if isinstance(data.get("sender"), dict) else {}
@@ -617,6 +675,28 @@ def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
 
     message_type = str(data.get("event_name") or data.get("event") or "zalo_message")
     return str(user_id), str(text), message_type
+
+
+def _format_job_notification(job: dict) -> str:
+    title = str(job.get("title") or "Job mới").strip()
+    company = str(job.get("company") or "").strip()
+    location = str(job.get("location") or job.get("location_norm") or "").strip()
+    salary = str(job.get("salary_text") or "").strip()
+    source = str(job.get("source") or "").strip()
+    url = str(job.get("job_url") or "").strip()
+
+    lines = [f"Job mới: {title}"]
+    if company:
+        lines.append(f"Công ty: {company}")
+    if location:
+        lines.append(f"Địa điểm: {location}")
+    if salary:
+        lines.append(f"Lương: {salary}")
+    if source:
+        lines.append(f"Nguồn: {source}")
+    if url:
+        lines.append(f"Xem chi tiết: {url}")
+    return "\n".join(lines)
 
 
 def _compact_json(data: dict, *, max_chars: int = 2000) -> str:
