@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 TOKEN_FILE = "tokens.json"
+ZALO_BOT_TEXT_LIMIT = 2000
 logger = logging.getLogger(__name__)
 
 class ZaloManager:
@@ -85,6 +86,24 @@ class ZaloManager:
             return response.json()
 
     async def send_zalo_bot_message(self, chat_id: str, text: str):
+        chunks = _chunk_zalo_text(text)
+        results = []
+        for index, chunk in enumerate(chunks, start=1):
+            result = await self._send_zalo_bot_message_chunk(chat_id, chunk)
+            results.append(result)
+            logger.info(
+                "Zalo Bot API chunk sent: "
+                f"chat_id={chat_id}, chunk={index}/{len(chunks)}, ok={result.get('ok')}"
+            )
+        if len(results) == 1:
+            return results[0]
+        return {
+            "ok": all(bool(item.get("ok")) for item in results),
+            "chunks": len(results),
+            "results": results,
+        }
+
+    async def _send_zalo_bot_message_chunk(self, chat_id: str, text: str):
         url = f"https://bot-api.zaloplatforms.com/bot{self.bot_token}/sendMessage"
         payload = {
             "chat_id": chat_id,
@@ -100,3 +119,51 @@ class ZaloManager:
                 f"chat_id={chat_id}, status={response.status_code}, body={data}"
             )
             return data
+
+
+def _chunk_zalo_text(text: str, *, limit: int = ZALO_BOT_TEXT_LIMIT) -> list[str]:
+    content = str(text or "").strip()
+    if not content:
+        return [""]
+    if len(content) <= limit:
+        return [content]
+
+    chunks: list[str] = []
+    current = ""
+    for block in _split_zalo_blocks(content):
+        candidate = f"{current}\n\n{block}".strip() if current else block
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+            current = ""
+        if len(block) <= limit:
+            current = block
+            continue
+        chunks.extend(_hard_split_text(block, limit=limit))
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _split_zalo_blocks(text: str) -> list[str]:
+    blocks = [block.strip() for block in text.split("\n\n") if block.strip()]
+    if len(blocks) > 1:
+        return blocks
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _hard_split_text(text: str, *, limit: int) -> list[str]:
+    chunks: list[str] = []
+    remaining = text.strip()
+    while len(remaining) > limit:
+        split_at = remaining.rfind(" ", 0, limit)
+        if split_at < int(limit * 0.6):
+            split_at = limit
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
