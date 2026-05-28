@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 bot_notify_secret = os.getenv("BOT_NOTIFY_SECRET", "")
 JOB_REDIRECT_URL_RE = re.compile(r"(https://bottimviec\.ai/jobs/redirect\?[^\s)]+|/jobs/redirect\?[^\s)]+)")
+TELEGRAM_JOB_LINK_LINE_RE = re.compile(r"(?m)^(\s*-?\s*)Xem chi tiết(?:\s*/\s*Ứng tuyển)?\s*:\s*(https?://[^\s)]+|/jobs/redirect\?[^\s)]+)\s*$")
+TELEGRAM_JOB_MARKDOWN_LINK_RE = re.compile(r"\[Xem chi tiết(?:\s*/\s*Ứng tuyển)?\]\(([^)]+)\)")
 
 @app.get("/")
 async def root():
@@ -55,6 +57,17 @@ def add_bot_tracking_to_job_redirects(
         return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
 
     return JOB_REDIRECT_URL_RE.sub(replace, text)
+
+
+def compact_telegram_job_links(text: str) -> str:
+    text = TELEGRAM_JOB_LINK_LINE_RE.sub(
+        lambda match: f"{match.group(1)}[Xem chi tiết/Ứng tuyển]({match.group(2)})",
+        text,
+    )
+    return TELEGRAM_JOB_MARKDOWN_LINK_RE.sub(
+        lambda match: f"[Xem chi tiết/Ứng tuyển]({match.group(1)})",
+        text,
+    )
 
 # ============ Example Handlers ============
 
@@ -419,6 +432,7 @@ async def process_with_ai(msg: IncomingMessage):
                         chat_id=msg.user_id,
                         conversation_id=conversation_id,
                     )
+                    response_text = compact_telegram_job_links(response_text)
 
                     logger.info(f"[AI Agent] Response: {response_text[:100]}...")
                     
@@ -639,7 +653,8 @@ async def internal_job_notification(request: Request):
                     chat_id=chat_id,
                     conversation_id=f"telegram:{chat_id}",
                 )
-                result = await sender.send_message(chat_id, text, text_mode=None)
+                text = compact_telegram_job_links(text)
+                result = await sender.send_message(chat_id, text, text_mode="html")
                 if result.get("ok"):
                     telegram_sent += 1
                 else:
