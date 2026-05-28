@@ -620,7 +620,6 @@ async def internal_job_notification(request: Request):
 
     payload = await request.json()
     job = payload.get("job") if isinstance(payload.get("job"), dict) else {}
-    text = _format_job_notification(job)
     ai_integration = await get_ai_integration()
     recipients = ai_integration.list_known_chat_ids()
 
@@ -634,6 +633,12 @@ async def internal_job_notification(request: Request):
         sender = TelegramSender()
         try:
             for chat_id in telegram_ids:
+                text = _format_job_notification(
+                    job,
+                    channel="telegram",
+                    chat_id=chat_id,
+                    conversation_id=f"telegram:{chat_id}",
+                )
                 result = await sender.send_message(chat_id, text, text_mode=None)
                 if result.get("ok"):
                     telegram_sent += 1
@@ -646,6 +651,12 @@ async def internal_job_notification(request: Request):
     if zalo_manager:
         for chat_id in recipients.get("zalo", []):
             try:
+                text = _format_job_notification(
+                    job,
+                    channel="zalo",
+                    chat_id=chat_id,
+                    conversation_id=f"zalo:{chat_id}",
+                )
                 result = await zalo_manager.send_zalo_message(chat_id, text)
                 if result.get("ok"):
                     zalo_sent += 1
@@ -711,26 +722,104 @@ def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
     return str(user_id), str(text), message_type
 
 
-def _format_job_notification(job: dict) -> str:
+def _format_job_notification(
+    job: dict,
+    *,
+    channel: str,
+    chat_id: str,
+    conversation_id: str,
+) -> str:
     title = str(job.get("title") or "Job mới").strip()
     company = str(job.get("company") or "").strip()
     location = str(job.get("location") or job.get("location_norm") or "").strip()
-    salary = str(job.get("salary_text") or "").strip()
+    salary = str(job.get("salary_text") or "Thương lượng").strip()
     source = str(job.get("source") or "").strip()
-    url = str(job.get("job_url") or "").strip()
+    highlight = _job_notification_highlight(job, location)
+    url = _build_job_notification_redirect_url(
+        job,
+        channel=channel,
+        chat_id=chat_id,
+        conversation_id=conversation_id,
+    )
 
-    lines = [f"Job mới: {title}"]
-    if company:
-        lines.append(f"Công ty: {company}")
+    heading = f"### {company} - {title}" if company else f"### {title}"
+    lines = ["Job mới", "", heading, f"- Mức lương: {salary}"]
     if location:
-        lines.append(f"Địa điểm: {location}")
-    if salary:
-        lines.append(f"Lương: {salary}")
+        lines.append(f"- Địa điểm: {location}")
     if source:
-        lines.append(f"Nguồn: {source}")
+        lines.append(f"- Nguồn: {source}")
+    if highlight:
+        lines.append(f"- Điểm nổi bật: {highlight}")
     if url:
-        lines.append(f"Xem chi tiết: {url}")
+        lines.append(f"- Xem chi tiết: {url}")
     return "\n".join(lines)
+
+
+def _job_notification_highlight(job: dict, location: str) -> str:
+    text = str(
+        job.get("summary")
+        or job.get("description")
+        or job.get("requirement")
+        or ""
+    ).strip()
+    if not text and location:
+        text = f"Địa điểm: {location}."
+    text = " ".join(text.split())
+    if len(text) > 320:
+        return text[:317].rstrip() + "..."
+    return text
+
+
+def _build_job_notification_redirect_url(
+    job: dict,
+    *,
+    channel: str,
+    chat_id: str,
+    conversation_id: str,
+) -> str:
+    target = str(job.get("job_url") or job.get("url") or "").strip()
+    if not target:
+        return ""
+
+    source = str(job.get("source") or "").strip() or _infer_job_source_from_url(target)
+    params = {
+        "job_id": str(job.get("id") or job.get("job_id") or job.get("job_id_vnw") or "").strip(),
+        "source": _normalize_job_source(source),
+        "target": target,
+        "title": str(job.get("title") or ""),
+        "company": str(job.get("company") or ""),
+        "location": str(job.get("location") or job.get("location_norm") or ""),
+        "salary_text": str(job.get("salary_text") or ""),
+        "channel": channel,
+        "chat_id": str(chat_id),
+        "conversation_id": conversation_id,
+    }
+    return f"https://bottimviec.ai/jobs/redirect?{urlencode(params)}"
+
+
+def _infer_job_source_from_url(url: str) -> str:
+    try:
+        host = urlsplit(url).hostname or ""
+    except Exception:
+        return ""
+    host = host.lower()
+    source_hosts = {
+        "topcv.vn": "topcv",
+        "vietnamworks.com": "vietnamworks",
+        "careerviet.vn": "careerviet",
+        "vieclam24h.vn": "vieclam24h",
+        "careerlink.vn": "careerlink",
+        "linkedin.com": "linkedin",
+        "facebook.com": "facebook",
+    }
+    for domain, source in source_hosts.items():
+        if host == domain or host.endswith(f".{domain}"):
+            return source
+    return ""
+
+
+def _normalize_job_source(value: str) -> str:
+    return value.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
 
 
 def _compact_json(data: dict, *, max_chars: int = 2000) -> str:
