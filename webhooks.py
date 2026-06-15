@@ -13,20 +13,59 @@ import asyncio
 import logging
 import json
 import re
+import hashlib
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+import httpx
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 bot_notify_secret = os.getenv("BOT_NOTIFY_SECRET", "")
+bot_link_api_base_url = os.getenv("BOT_LINK_API_BASE_URL", os.getenv("FASTAPI_BASE_URL", "http://127.0.0.1:8000")).rstrip("/")
+bot_link_reminder_enabled = os.getenv("BOT_LINK_REMINDER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+bot_link_reminder_interval_seconds = int(os.getenv("BOT_LINK_REMINDER_INTERVAL_SECONDS", "21600") or 21600)
+bot_link_reminder_cooldown_seconds = int(os.getenv("BOT_LINK_REMINDER_COOLDOWN_SECONDS", "86400") or 86400)
+bot_link_reminder_initial_delay_seconds = int(os.getenv("BOT_LINK_REMINDER_INITIAL_DELAY_SECONDS", "60") or 60)
+bot_link_reminder_task: asyncio.Task | None = None
 JOB_REDIRECT_URL_RE = re.compile(r"(https://bottimviec\.ai/jobs/redirect\?[^\s)]+|/jobs/redirect\?[^\s)]+)")
 TELEGRAM_JOB_LINK_LINE_RE = re.compile(r"(?m)^(\s*-?\s*)Xem chi tiết(?:\s*/\s*Ứng tuyển)?\s*:\s*(https?://[^\s)]+|/jobs/redirect\?[^\s)]+)\s*$")
 TELEGRAM_JOB_MARKDOWN_LINK_RE = re.compile(r"\[Xem chi tiết(?:\s*/\s*Ứng tuyển)?\]\(([^)]+)\)")
+BOT_LINK_CODE_RE = re.compile(r"\b[A-Z0-9]{4}(?:-| )?[A-Z0-9]{4}\b", re.IGNORECASE)
 
 @app.get("/")
 async def root():
     return {"message": "AI Chatbot Backend is running!"}
+
+
+@app.on_event("startup")
+async def start_bot_link_reminder_scheduler():
+    global bot_link_reminder_task
+    if not bot_link_reminder_enabled:
+        logger.info("Bot link reminder scheduler disabled")
+        return
+    if bot_link_reminder_task and not bot_link_reminder_task.done():
+        return
+    bot_link_reminder_task = asyncio.create_task(bot_link_reminder_loop())
+    logger.info(
+        "Bot link reminder scheduler started interval_seconds=%s cooldown_seconds=%s initial_delay_seconds=%s",
+        bot_link_reminder_interval_seconds,
+        bot_link_reminder_cooldown_seconds,
+        bot_link_reminder_initial_delay_seconds,
+    )
+
+
+@app.on_event("shutdown")
+async def stop_bot_link_reminder_scheduler():
+    global bot_link_reminder_task
+    if bot_link_reminder_task and not bot_link_reminder_task.done():
+        bot_link_reminder_task.cancel()
+        try:
+            await bot_link_reminder_task
+        except asyncio.CancelledError:
+            pass
+    bot_link_reminder_task = None
 
 # Initialize Zalo Manager
 zalo_bot_token = os.getenv("ZALO_BOT_TOKEN")
@@ -68,6 +107,159 @@ def compact_telegram_job_links(text: str) -> str:
         lambda match: f"[Xem chi tiết/Ứng tuyển]({match.group(1)})",
         text,
     )
+
+
+def _bot_link_headers() -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if bot_notify_secret:
+        headers["x-bot-notify-secret"] = bot_notify_secret
+    return headers
+
+
+async def lookup_bot_account(*, channel: str, chat_id: str) -> dict:
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            f"{bot_link_api_base_url}/api/v1/internal/bot-links/lookup",
+            headers=_bot_link_headers(),
+            json={"channel": channel, "chat_id": str(chat_id)},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def verify_bot_link_code(
+    *,
+    code: str,
+    channel: str,
+    chat_id: str,
+    display_name: str | None = None,
+    username: str | None = None,
+) -> dict:
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            f"{bot_link_api_base_url}/api/v1/internal/bot-links/verify",
+            headers=_bot_link_headers(),
+            json={
+                "code": code,
+                "channel": channel,
+                "chat_id": str(chat_id),
+                "display_name": display_name,
+                "username": username,
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def list_linked_bot_recipients() -> dict[str, list[str]]:
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(
+            f"{bot_link_api_base_url}/api/v1/internal/bot-links/recipients",
+            headers=_bot_link_headers(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return {
+            "telegram": [str(item) for item in payload.get("telegram", []) if str(item).strip()],
+            "zalo": [str(item) for item in payload.get("zalo", []) if str(item).strip()],
+        }
+
+
+def bot_link_instruction_text() -> str:
+    return (
+        "Để nhận thông báo việc làm mỗi ngày, tôi cần định danh bạn.\n"
+        "Hãy vào https://bottimviec.ai, bấm biểu tượng Zalo/Telegram cạnh ô chat, "
+        "copy mã định danh và gửi lại mã đó cho bot."
+    )
+
+
+def normalize_bot_link_message(text: str) -> str:
+    return text.replace("\u2013", "-").replace("\u2014", "-")
+
+
+def format_link_success_text(payload: dict) -> str:
+    user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    lines = [
+        "Cảm ơn bạn đã định danh.",
+        "",
+        "Thông tin của bạn:",
+        f"- Tài khoản: {user.get('name') or user.get('username') or 'Chưa rõ'}",
+    ]
+    if user.get("email"):
+        lines.append(f"- Email: {user['email']}")
+    if user.get("current_location_address"):
+        lines.append(f"- Vị trí: {user['current_location_address']}")
+    lines.append("")
+    lines.append("Bạn sẽ nhận được thông báo khi có việc làm mới.")
+    return "\n".join(lines)
+
+
+async def send_platform_text(*, platform: str, chat_id: str, text: str) -> None:
+    if platform == "tele":
+        sender = TelegramSender()
+        try:
+            await sender.send_message(chat_id, text, text_mode=None)
+        finally:
+            sender.close()
+        return
+    if platform == "zalo":
+        if zalo_manager:
+            await zalo_manager.send_zalo_message(chat_id, text)
+        else:
+            logger.error("Cannot send Zalo message: ZaloManager is not initialized.")
+
+
+async def send_bot_link_reminders_to_unknown_chats(*, respect_cooldown: bool = True) -> dict:
+    ai_integration = await get_ai_integration()
+    recipients = ai_integration.list_known_chat_ids()
+    sent = {"telegram": 0, "zalo": 0}
+    skipped_linked = {"telegram": 0, "zalo": 0}
+    skipped_cooldown = {"telegram": 0, "zalo": 0}
+    failed = {"telegram": 0, "zalo": 0}
+
+    for platform, channel, chat_ids in [
+        ("tele", "telegram", recipients.get("telegram", [])),
+        ("zalo", "zalo", recipients.get("zalo", [])),
+    ]:
+        for chat_id in chat_ids:
+            try:
+                account = await lookup_bot_account(channel=channel, chat_id=chat_id)
+                if account.get("linked"):
+                    skipped_linked[channel] += 1
+                    continue
+                if respect_cooldown and not ai_integration.should_send_bot_link_reminder(
+                    channel=channel,
+                    chat_id=chat_id,
+                    cooldown_seconds=bot_link_reminder_cooldown_seconds,
+                ):
+                    skipped_cooldown[channel] += 1
+                    continue
+                await send_platform_text(platform=platform, chat_id=chat_id, text=bot_link_instruction_text())
+                ai_integration.mark_bot_link_reminder_sent(channel=channel, chat_id=chat_id)
+                sent[channel] += 1
+            except Exception as exc:
+                failed[channel] += 1
+                logger.error(f"Failed to send bot link reminder to {channel}:{chat_id}: {exc}")
+
+    return {
+        "sent": sent,
+        "skipped_linked": skipped_linked,
+        "skipped_cooldown": skipped_cooldown,
+        "failed": failed,
+    }
+
+
+async def bot_link_reminder_loop() -> None:
+    await asyncio.sleep(max(0, bot_link_reminder_initial_delay_seconds))
+    while True:
+        try:
+            result = await send_bot_link_reminders_to_unknown_chats(respect_cooldown=True)
+            logger.info(f"bot_link_reminder_tick result={result}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error(f"bot_link_reminder_tick_failed: {exc}")
+        await asyncio.sleep(max(60, bot_link_reminder_interval_seconds))
 
 # ============ Example Handlers ============
 
@@ -388,6 +580,41 @@ async def process_with_ai(msg: IncomingMessage):
 
     # Check if message is an example command
     command = msg.text_content.strip().lower()
+    channel = "telegram" if msg.platform == "tele" else msg.platform
+    linked_user = None
+
+    if channel in {"telegram", "zalo"}:
+        code_match = BOT_LINK_CODE_RE.search(normalize_bot_link_message(msg.text_content.strip()))
+        if code_match:
+            logger.info(f"Detected bot link code from {channel}:{msg.user_id}")
+            try:
+                verify_result = await verify_bot_link_code(
+                    code=code_match.group(0),
+                    channel=channel,
+                    chat_id=msg.user_id,
+                )
+                text = (
+                    format_link_success_text(verify_result)
+                    if verify_result.get("ok")
+                    else verify_result.get("message", "Mã định danh không hợp lệ")
+                )
+            except Exception as exc:
+                logger.error(f"Bot link verify failed for {channel}:{msg.user_id}: {exc}")
+                text = "Không thể xác thực mã lúc này. Vui lòng thử lại sau."
+            await send_platform_text(platform=msg.platform, chat_id=msg.user_id, text=text)
+            return
+
+        try:
+            account = await lookup_bot_account(channel=channel, chat_id=msg.user_id)
+        except Exception as exc:
+            logger.error(f"Bot link lookup failed for {channel}:{msg.user_id}: {exc}")
+            await send_platform_text(platform=msg.platform, chat_id=msg.user_id, text=bot_link_instruction_text())
+            return
+        linked_user = account.get("user") if isinstance(account.get("user"), dict) else None
+
+        if not account.get("linked"):
+            await send_platform_text(platform=msg.platform, chat_id=msg.user_id, text=bot_link_instruction_text())
+            return
 
     if msg.platform == "tele":
         try:
@@ -414,7 +641,8 @@ async def process_with_ai(msg: IncomingMessage):
                 try:
                     ai_integration = await get_ai_integration()
                     conversation_id = f"telegram:{msg.user_id}"
-                    ai_integration.ensure_telegram_user(str(msg.user_id))
+                    internal_user_id = f"user_{linked_user['id']}" if linked_user and linked_user.get("id") else None
+                    ai_integration.ensure_telegram_user(str(msg.user_id), internal_user_id=internal_user_id)
                     ai_integration.ensure_conversation(conversation_id, str(msg.user_id))
                     ai_integration.add_message(conversation_id, "user", msg.text_content, message_type=msg.message_type or "text")
 
@@ -422,9 +650,15 @@ async def process_with_ai(msg: IncomingMessage):
                     response_text, events = await ai_integration.run_turn(
                         conversation_uuid=conversation_id,
                         run_uuid=uuid4().hex[:12],
-                        user_id=str(msg.user_id),
+                        user_id=internal_user_id or str(msg.user_id),
                         messages=history,
-                        metadata={"user_profile": {"channel": "telegram", "telegram_chat_id": str(msg.user_id)}},
+                        metadata={
+                            "user_profile": {
+                                **(linked_user or {}),
+                                "channel": "telegram",
+                                "telegram_chat_id": str(msg.user_id),
+                            }
+                        },
                     )
                     response_text = add_bot_tracking_to_job_redirects(
                         response_text,
@@ -486,7 +720,8 @@ async def process_with_ai(msg: IncomingMessage):
             logger.info(f"[AI Agent][Zalo] Getting response for user {msg.user_id}: {msg.text_content}")
             ai_integration = await get_ai_integration()
             conversation_id = f"zalo:{msg.user_id}"
-            ai_integration.ensure_telegram_user(f"zalo:{msg.user_id}", internal_user_id=f"zalo_{msg.user_id}")
+            internal_user_id = f"user_{linked_user['id']}" if linked_user and linked_user.get("id") else f"zalo_{msg.user_id}"
+            ai_integration.ensure_telegram_user(f"zalo:{msg.user_id}", internal_user_id=internal_user_id)
             ai_integration.ensure_conversation(conversation_id, f"zalo:{msg.user_id}")
             ai_integration.add_message(conversation_id, "user", msg.text_content, message_type=msg.message_type or "text")
 
@@ -494,9 +729,15 @@ async def process_with_ai(msg: IncomingMessage):
             response_text, events = await ai_integration.run_turn(
                 conversation_uuid=conversation_id,
                 run_uuid=uuid4().hex[:12],
-                user_id=f"zalo:{msg.user_id}",
+                user_id=internal_user_id,
                 messages=history,
-                metadata={"user_profile": {"channel": "zalo", "zalo_user_id": str(msg.user_id)}},
+                metadata={
+                    "user_profile": {
+                        **(linked_user or {}),
+                        "channel": "zalo",
+                        "zalo_user_id": str(msg.user_id),
+                    }
+                },
             )
             response_text = add_bot_tracking_to_job_redirects(
                 response_text,
@@ -634,8 +875,11 @@ async def internal_job_notification(request: Request):
 
     payload = await request.json()
     job = payload.get("job") if isinstance(payload.get("job"), dict) else {}
-    ai_integration = await get_ai_integration()
-    recipients = ai_integration.list_known_chat_ids()
+    try:
+        recipients = await list_linked_bot_recipients()
+    except Exception as exc:
+        logger.error(f"Failed to fetch linked bot recipients: {exc}")
+        recipients = {"telegram": [], "zalo": []}
 
     telegram_sent = 0
     telegram_failed = 0
@@ -647,11 +891,13 @@ async def internal_job_notification(request: Request):
         sender = TelegramSender()
         try:
             for chat_id in telegram_ids:
+                user_name = await get_linked_user_display_name(channel="telegram", chat_id=chat_id)
                 text = _format_job_notification(
                     job,
                     channel="telegram",
                     chat_id=chat_id,
                     conversation_id=f"telegram:{chat_id}",
+                    user_name=user_name,
                 )
                 text = compact_telegram_job_links(text)
                 result = await sender.send_message(chat_id, text, text_mode="html")
@@ -666,11 +912,13 @@ async def internal_job_notification(request: Request):
     if zalo_manager:
         for chat_id in recipients.get("zalo", []):
             try:
+                user_name = await get_linked_user_display_name(channel="zalo", chat_id=chat_id)
                 text = _format_job_notification(
                     job,
                     channel="zalo",
                     chat_id=chat_id,
                     conversation_id=f"zalo:{chat_id}",
+                    user_name=user_name,
                 )
                 result = await zalo_manager.send_zalo_message(chat_id, text)
                 if result.get("ok"):
@@ -692,6 +940,106 @@ async def internal_job_notification(request: Request):
         "zalo_sent": zalo_sent,
         "zalo_failed": zalo_failed,
     }
+
+
+@app.post("/internal/bot-link-reminders")
+async def internal_bot_link_reminders(request: Request):
+    if bot_notify_secret:
+        received_secret = request.headers.get("x-bot-notify-secret", "")
+        if received_secret != bot_notify_secret:
+            raise HTTPException(status_code=401, detail="Invalid notification secret")
+
+    result = await send_bot_link_reminders_to_unknown_chats(respect_cooldown=False)
+    return {"status": "ok", **result}
+
+
+@app.post("/internal/dispatch-message")
+async def internal_dispatch_message(request: Request):
+    """
+    Nhận DispatchAction từ SmartDispatcher và gửi tin cho user cụ thể.
+
+    Payload JSON:
+    {
+        "channel": "telegram" | "zalo",
+        "chat_id": "123456789",
+        "user_id": 42,
+        "user_name": "Hùng",
+        "message_text": "...",
+        "message_type": "single" | "digest" | "cold_start",
+        "job_ids": ["job-1", "job-2"],
+        "match_scores": [0.85, 0.72]
+    }
+    """
+    if bot_notify_secret:
+        received_secret = request.headers.get("x-bot-notify-secret", "")
+        if received_secret != bot_notify_secret:
+            raise HTTPException(status_code=401, detail="Invalid notification secret")
+
+    payload = await request.json()
+    channel = str(payload.get("channel", "")).strip().lower()
+    chat_id = str(payload.get("chat_id", "")).strip()
+    message_text = str(payload.get("message_text", "")).strip()
+    message_type = str(payload.get("message_type", "single")).strip()
+    user_name = str(payload.get("user_name", "")).strip()
+
+    if not channel or not chat_id or not message_text:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required fields: channel, chat_id, message_text",
+        )
+
+    logger.info(
+        "dispatch_message_received channel=%s chat_id=%s type=%s user=%s len=%d",
+        channel, chat_id, message_type, user_name, len(message_text),
+    )
+
+    result = {"channel": channel, "chat_id": chat_id, "type": message_type}
+
+    try:
+        if channel == "telegram":
+            sender = TelegramSender()
+            try:
+                # Compact links cho Telegram
+                formatted_text = compact_telegram_job_links(message_text)
+                send_result = await sender.send_message(
+                    chat_id, formatted_text, text_mode="html",
+                )
+                result["ok"] = send_result.get("ok", False)
+                if not send_result.get("ok"):
+                    result["error"] = send_result.get("error", "Unknown error")
+                    logger.error(
+                        "dispatch_send_failed channel=telegram chat_id=%s error=%s",
+                        chat_id, result["error"],
+                    )
+            finally:
+                sender.close()
+
+        elif channel == "zalo":
+            if not zalo_manager:
+                result["ok"] = False
+                result["error"] = "ZaloManager not initialized"
+                logger.error("dispatch_send_failed channel=zalo reason=no_zalo_manager")
+            else:
+                send_result = await zalo_manager.send_zalo_message(chat_id, message_text)
+                result["ok"] = send_result.get("ok", False) if isinstance(send_result, dict) else True
+                if isinstance(send_result, dict) and not send_result.get("ok"):
+                    result["error"] = send_result.get("error", "Unknown error")
+
+        else:
+            result["ok"] = False
+            result["error"] = f"Unsupported channel: {channel}"
+
+    except Exception as exc:
+        result["ok"] = False
+        result["error"] = str(exc)
+        logger.error(
+            "dispatch_send_exception channel=%s chat_id=%s error=%s",
+            channel, chat_id, exc,
+        )
+
+    logger.info("dispatch_message_result %s", result)
+    return {"status": "ok" if result.get("ok") else "error", **result}
+
 
 
 def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
@@ -737,12 +1085,66 @@ def _parse_zalo_webhook_payload(data: dict) -> tuple[str, str, str] | None:
     return str(user_id), str(text), message_type
 
 
+async def get_linked_user_display_name(*, channel: str, chat_id: str) -> str:
+    try:
+        account = await lookup_bot_account(channel=channel, chat_id=chat_id)
+    except Exception as exc:
+        logger.error(f"Failed to lookup linked user for notification {channel}:{chat_id}: {exc}")
+        return ""
+    user = account.get("user") if isinstance(account.get("user"), dict) else {}
+    return _friendly_user_name(str(user.get("name") or user.get("username") or "").strip())
+
+
+def _friendly_user_name(value: str) -> str:
+    if not value:
+        return ""
+    clean = " ".join(value.replace("@", " ").split())
+    if not clean:
+        return ""
+    parts = clean.split()
+    if len(parts) >= 2 and len(parts[-1]) > 1 and parts[-1].isupper():
+        return parts[0][:30]
+    # Vietnamese users are commonly addressed by their given name, often the last token.
+    return parts[-1][:30]
+
+
+def _notification_intro(*, user_name: str, job: dict, chat_id: str) -> str:
+    title = str(job.get("title") or "").strip()
+    company = str(job.get("company") or "").strip()
+    name = user_name or "bạn"
+    variants = [
+        f"{name} ơi, việc làm này có hợp với bạn không?",
+        f"{name} ơi, mình vừa thấy một job mới khá đáng xem.",
+        f"{name} ơi, job này có thể là một cơ hội tốt cho bạn.",
+        f"{name} ơi, có một việc mới vừa được thêm vào hệ thống.",
+        f"{name} ơi, thử xem job này có đúng gu của bạn không.",
+        f"{name} ơi, mình nghĩ job này đáng để bạn lướt qua.",
+        f"{name} ơi, có tin tuyển dụng mới cho bạn đây.",
+        f"{name} ơi, job mới này có vẻ đáng chú ý.",
+        f"{name} ơi, bạn muốn xem thử cơ hội này không?",
+        f"{name} ơi, có một job mới vừa lên, xem nhanh nhé.",
+    ]
+    if title and company:
+        variants.extend(
+            [
+                f"{name} ơi, {company} đang tuyển {title}. Bạn xem thử nhé.",
+                f"{name} ơi, có job {title} ở {company}, nghe khá đáng chú ý.",
+                f"{name} ơi, mình thấy {company} vừa có vị trí {title}.",
+            ]
+        )
+    seed = f"{chat_id}|{job.get('id') or job.get('job_id') or job.get('job_url') or title}|{company}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    index = int(digest[:8], 16) % len(variants)
+    return variants[index]
+
+
 def _format_job_notification(
     job: dict,
     *,
     channel: str,
     chat_id: str,
     conversation_id: str,
+    user_name: str = "",
 ) -> str:
     title = str(job.get("title") or "Job mới").strip()
     company = str(job.get("company") or "").strip()
@@ -758,7 +1160,7 @@ def _format_job_notification(
     )
 
     heading = f"### {company} - {title}" if company else f"### {title}"
-    lines = ["Job mới", "", heading, f"- Mức lương: {salary}"]
+    lines = [_notification_intro(user_name=user_name, job=job, chat_id=chat_id), "", heading, f"- Mức lương: {salary}"]
     if location:
         lines.append(f"- Địa điểm: {location}")
     if source:

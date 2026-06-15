@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 from typing import AsyncGenerator, Callable, Optional, List, Dict, Any, Tuple, Union
@@ -265,6 +266,16 @@ class AIAgentIntegration:
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_link_reminders (
+                channel TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                last_sent_at TEXT NOT NULL,
+                PRIMARY KEY (channel, chat_id)
+            )
+            """
+        )
         self.conn.commit()
 
     def ensure_telegram_user(self, telegram_chat_id: str, internal_user_id: Optional[str] = None) -> Optional[str]:
@@ -309,6 +320,36 @@ class AIAgentIntegration:
             else:
                 telegram_ids.append(chat_id)
         return {"telegram": telegram_ids, "zalo": zalo_ids}
+
+    def should_send_bot_link_reminder(self, *, channel: str, chat_id: str, cooldown_seconds: int) -> bool:
+        if self.conn is None:
+            raise RuntimeError("Database connection is not initialized")
+        cursor = self.conn.execute(
+            "SELECT last_sent_at FROM bot_link_reminders WHERE channel = ? AND chat_id = ?",
+            (channel, chat_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return True
+        try:
+            last_sent_at = datetime.fromisoformat(str(row["last_sent_at"]))
+        except Exception:
+            return True
+        return datetime.utcnow() - last_sent_at >= timedelta(seconds=max(1, cooldown_seconds))
+
+    def mark_bot_link_reminder_sent(self, *, channel: str, chat_id: str) -> None:
+        if self.conn is None:
+            raise RuntimeError("Database connection is not initialized")
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            """
+            INSERT INTO bot_link_reminders (channel, chat_id, last_sent_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(channel, chat_id) DO UPDATE SET last_sent_at = excluded.last_sent_at
+            """,
+            (channel, chat_id, now),
+        )
+        self.conn.commit()
 
     def ensure_conversation(self, conversation_id: str, telegram_chat_id: str) -> None:
         if self.conn is None:
