@@ -1165,6 +1165,9 @@ def _format_job_notification(
         lines.append(f"- Địa điểm: {location}")
     if source:
         lines.append(f"- Nguồn: {source}")
+    reason = str(job.get("notification_reason") or "").strip()
+    if reason:
+        lines.append(f"- Lý do: {reason}")
     if highlight:
         lines.append(f"- Điểm nổi bật: {highlight}")
     if url:
