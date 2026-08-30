@@ -14,7 +14,7 @@ import logging
 import json
 import re
 import hashlib
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -90,10 +90,19 @@ def add_bot_tracking_to_job_redirects(
         url = match.group(1)
         parts = urlsplit(url)
         params = dict(parse_qsl(parts.query, keep_blank_values=True))
-        params.setdefault("channel", channel)
-        params.setdefault("chat_id", str(chat_id))
-        params.setdefault("conversation_id", conversation_id)
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+        job_id = str(params.get("job_id") or "").strip()
+        if not job_id:
+            return url
+        public_params = {"channel": str(chat_id)}
+        return urlunsplit(
+            (
+                parts.scheme or "https",
+                parts.netloc or "bottimviec.ai",
+                f"/jobs/details/{quote(job_id, safe='')}",
+                urlencode(public_params),
+                parts.fragment,
+            )
+        )
 
     return JOB_REDIRECT_URL_RE.sub(replace, text)
 
@@ -1197,24 +1206,10 @@ def _build_job_notification_redirect_url(
     chat_id: str,
     conversation_id: str,
 ) -> str:
-    target = str(job.get("job_url") or job.get("url") or "").strip()
-    if not target:
+    job_id = str(job.get("id") or job.get("job_id") or job.get("job_id_vnw") or "").strip()
+    if not job_id:
         return ""
-
-    source = str(job.get("source") or "").strip() or _infer_job_source_from_url(target)
-    params = {
-        "job_id": str(job.get("id") or job.get("job_id") or job.get("job_id_vnw") or "").strip(),
-        "source": _normalize_job_source(source),
-        "target": target,
-        "title": str(job.get("title") or ""),
-        "company": str(job.get("company") or ""),
-        "location": str(job.get("location") or job.get("location_norm") or ""),
-        "salary_text": str(job.get("salary_text") or ""),
-        "channel": channel,
-        "chat_id": str(chat_id),
-        "conversation_id": conversation_id,
-    }
-    return f"https://bottimviec.ai/jobs/redirect?{urlencode(params)}"
+    return f"https://bottimviec.ai/jobs/details/{quote(job_id, safe='')}?{urlencode({'channel': str(chat_id)})}"
 
 
 def _infer_job_source_from_url(url: str) -> str:
