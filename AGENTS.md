@@ -61,3 +61,25 @@ This repository adheres to disciplined, production-grade software engineering pr
 - **Mandatory Safety Rule**:
   - NEVER execute destructive commands (deleting records, dropping tables/databases, removing critical files) without explicit confirmation from the user.
 - **Detailed Reference**: See [DEPLOYMENT.md](file:///./DEPLOYMENT.md).
+
+---
+
+## 5. Hiến Pháp Ngôn Ngữ & Quản Lý Thực Thể (Language, UI & Entity Constitution)
+
+1. **Chuẩn Mực Tiếng Việt Có Dấu Tuyệt Đối (Strict Diacritics For User-Facing Content)**:
+   - Mọi thông điệp, văn bản, thông báo, thẻ hiển thị, nhãn, nút bấm và nội dung phản hồi trả về cho người dùng cuối (User-Facing) **BẮT BUỘC 100% PHẢI LÀ TIẾNG VIỆT CÓ DẤU**, chuẩn ngữ pháp, rõ nghĩa và chuyên nghiệp.
+   - Tuyệt đối nghiêm cấm hiển thị tiếng Việt không dấu ra ngoài giao diện (ví dụ: không viết "Muc luong", "Dia diem", "Ban co muon xem tiep khong?", phải viết chính xác: "Mức lương:", "Địa điểm:", "Bạn có muốn xem tiếp không?").
+   - Văn bản không dấu chỉ được phép tồn tại trong các thuật toán ngầm nội bộ (internal normalization, token search, regex parsing).
+
+2. **Quản Lý Thực Thể & Ontology Tập Trung (Centralized Ontology & Anti-Literal Strings)**:
+   - Nghiêm cấm phân tán, tự ý định nghĩa ad-hoc các Literal String rời rạc (danh sách ngành nghề, tỉnh thành, skills, topwords, cấp bậc, nhóm công ty...) rải rác ở nhiều file logic.
+   - Toàn bộ thực thể, từ đồng nghĩa (synonyms), phân cấp chức danh (level/role taxonomy), nhóm tổ chức (Big4, FAANG, Top Tech...) phải có nguồn sự thật duy nhất (Single Source of Truth) từ hệ thống Ontology tập trung, đồng bộ với dữ liệu thực tế từ database (Typesense / MySQL).
+
+---
+
+## 6. Tiêu Chuẩn Giám Sát, Debug & Profile Hiệu Năng (Observability & LangSmith Standard)
+
+- **Ưu tiên LangSmith cho Debug & Profiling**:
+  - Khi cần chẩn đoán lỗi (diagnose bugs), truy vết sự cố hội thoại, phân tích prompt/output của LLM, đo lường độ trễ (latency profiling), hoặc kiểm tra token usage/costs, **BẮT BUỘC ưu tiên truy cập LangSmith API** (sử dụng credentials cấu hình trong `.env`: `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`, `LANGCHAIN_ENDPOINT`).
+  - Lấy dữ liệu thực tế (real traces, child spans, tool arguments, errors, exceptions) từ LangSmith làm căn cứ chẩn đoán, tuyệt đối không suy đoán mù (no speculative debugging).
+
