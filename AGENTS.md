@@ -75,6 +75,17 @@ This repository adheres to disciplined, production-grade software engineering pr
    - Nghiêm cấm phân tán, tự ý định nghĩa ad-hoc các Literal String rời rạc (danh sách ngành nghề, tỉnh thành, skills, topwords, cấp bậc, nhóm công ty...) rải rác ở nhiều file logic.
    - Toàn bộ thực thể, từ đồng nghĩa (synonyms), phân cấp chức danh (level/role taxonomy), nhóm tổ chức (Big4, FAANG, Top Tech...) phải có nguồn sự thật duy nhất (Single Source of Truth) từ hệ thống Ontology tập trung, đồng bộ với dữ liệu thực tế từ database (Typesense / MySQL).
 
+3. **Chuẩn Mực Định Dạng Ngày Giờ & Múi Giờ Hà Nội (Hanoi UTC+7 Datetime Constitution)**:
+   - Mọi mốc thời gian, ngày giờ hiển thị trên giao diện người dùng (User-Facing & Admin-Facing) **BẮT BUỘC theo múi giờ Hà Nội (UTC+7, `Asia/Ho_Chi_Minh`)**.
+   - Định dạng ngày chuẩn: `dd/MM/yyyy` (nghiêm cấm hiển thị `MM/dd/yyyy` hay `yyyy-MM-dd` thô ra UI).
+   - Định dạng giờ chuẩn: `HH:mm:ss` (hoặc `HH:mm`).
+   - Định dạng ngày & giờ kết hợp: `HH:mm:ss dd/MM/yyyy`.
+   - Phải sử dụng bộ hàm chuẩn hóa tập trung (ví dụ: `src/lib/datetime.ts`) thay vì tự ý gọi `toLocaleDateString()` / `toLocaleTimeString()` không cấu hình múi giờ khiến thời gian hiển thị sai lệch theo múi giờ máy khách.
+
+4. **Nguyên Tắc Trực Quan & Toàn Vẹn Khung Nhìn (Layout & Overlay Integrity)**:
+   - Mọi slide-over drawer, modal chi tiết nghiệp vụ (như Timeline hành trình phiên) phải sở hữu z-index cao cấp độ ưu tiên (`z-[9999]`), chiếm trọn khung nhìn theo chiều dọc.
+   - Các thành phần khung sườn cố định không dùng đến (như `kt_app_header`) phải được ẩn dứt điểm (`d-none`, gỡ bỏ `data-kt-app-header-fixed`), tuyệt đối không để chèn ép hay che khuất thông tin thao tác của người dùng.
+
 ---
 
 ## 6. Tiêu Chuẩn Giám Sát, Debug & Profile Hiệu Năng (Observability & LangSmith Standard)
