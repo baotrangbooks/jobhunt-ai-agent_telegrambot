@@ -60,6 +60,11 @@ This repository adheres to disciplined, production-grade software engineering pr
   - `ssh -L 3306:localhost:3306 -L 8108:localhost:8108 -L 6379:localhost:6379 duongnv@123.30.233.101` (forwards MySQL, TypeSense, Redis to local for live testing).
 - **Mandatory Safety Rule**:
   - NEVER execute destructive commands (deleting records, dropping tables/databases, removing critical files) without explicit confirmation from the user.
+- **Hiến Pháp Giao Thức Admin Nội Bộ (Strict HTTP For Admin Subdomain)**:
+  - **Domain Admin Nội Bộ**: `http://admin.aihunter.com` (giao thức HTTP, **tuyệt đối KHÔNG có chữ S** - `https://`).
+  - Domain này chỉ chạy nội bộ trên máy admin, KHÔNG có chứng chỉ SSL, KHÔNG public ra Internet.
+  - Mọi cấu hình, base URL trong Extension, Frontend, Backend, tài liệu và môi trường nội bộ **BẮT BUỘC 100% PHẢI LÀ HTTP**: `http://admin.aihunter.com`. Nghiêm cấm tự ý thêm `s` thành `https://admin.aihunter.com`.
+  - Đối với Chrome Extension khi chạy trên các trang HTTPS (như Facebook): BẮT BUỘC phải thực hiện network request qua Background Service Worker để tránh việc trình duyệt tự động nâng cấp mixed-content (`upgrade-insecure-requests`) thành HTTPS.
 - **Detailed Reference**: See [DEPLOYMENT.md](file:///./DEPLOYMENT.md).
 
 ---
