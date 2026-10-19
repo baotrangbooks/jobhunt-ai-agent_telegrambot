@@ -23,7 +23,10 @@ def patch_datetime_utc():
             
             # Update the module's __all__ if it exists
             if hasattr(_dt, "__all__"):
-                _dt.__all__.append("UTC")
+                if isinstance(_dt.__all__, list):
+                    _dt.__all__.append("UTC")
+                elif isinstance(_dt.__all__, tuple):
+                    _dt.__all__ = _dt.__all__ + ("UTC",)
 
 # Apply patch immediately on import
 patch_datetime_utc()

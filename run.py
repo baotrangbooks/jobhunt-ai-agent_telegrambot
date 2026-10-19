@@ -3,6 +3,8 @@ Telegram Bot with AI Agent Integration
 Run this script to start the FastAPI webhook server
 """
 
+import patch_datetime  # type: ignore
+
 import asyncio
 import logging
 import uvicorn

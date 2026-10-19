@@ -174,6 +174,41 @@ async def list_linked_bot_recipients() -> dict[str, list[str]]:
         }
 
 
+async def record_bot_chat_message(
+    *,
+    channel: str,
+    chat_id: str,
+    direction: str,
+    sender_type: str,
+    message_text: str,
+    sender_name: str | None = None,
+    raw_payload: str | None = None,
+    channel_message_id: str | None = None,
+) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{bot_link_api_base_url}/api/v1/internal/bot-chat/messages",
+                headers=_bot_link_headers(),
+                json={
+                    "channel": channel,
+                    "chat_id": str(chat_id),
+                    "direction": direction,
+                    "sender_type": sender_type,
+                    "sender_name": sender_name,
+                    "message_text": message_text,
+                    "raw_payload": raw_payload,
+                    "channel_message_id": channel_message_id,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as exc:
+        logger.warning(f"Failed to record bot chat message to backend: {exc}")
+        return {"ok": False, "is_human_takeover": False}
+
+
+
 def bot_link_instruction_text() -> str:
     return (
         "Để nhận thông báo việc làm mỗi ngày, tôi cần định danh bạn.\n"
@@ -625,6 +660,22 @@ async def process_with_ai(msg: IncomingMessage):
             await send_platform_text(platform=msg.platform, chat_id=msg.user_id, text=bot_link_instruction_text())
             return
 
+        # ── Đồng bộ tin nhắn ứng viên & Kiểm tra Tiếp Quản (Human Takeover) ──
+        sync_result = await record_bot_chat_message(
+            channel=channel,
+            chat_id=msg.user_id,
+            direction="inbound",
+            sender_type="candidate",
+            message_text=msg.text_content,
+            sender_name=(linked_user.get("name") if linked_user else None) or account.get("display_name"),
+        )
+        if sync_result.get("is_human_takeover"):
+            logger.info(
+                f"[Human Takeover] Hội thoại {channel}:{msg.user_id} đang được Quản trị viên tiếp quản trực tiếp. "
+                "Tạm dừng phản hồi bot AI tự động."
+            )
+            return
+
     if msg.platform == "tele":
         try:
             sender = TelegramSender()
@@ -711,6 +762,14 @@ async def process_with_ai(msg: IncomingMessage):
                         )
                         if result.get("ok"):
                             logger.info(f"AI message sent to Telegram successfully")
+                            await record_bot_chat_message(
+                                channel="telegram",
+                                chat_id=msg.user_id,
+                                direction="outbound",
+                                sender_type="bot",
+                                message_text=response_text,
+                                sender_name="Bot AI",
+                            )
                         else:
                             logger.error(f"Failed to send AI message: {result.get('error')}")
                 
@@ -760,6 +819,14 @@ async def process_with_ai(msg: IncomingMessage):
                 return
             send_result = await zalo_manager.send_zalo_message(msg.user_id, response_text)
             logger.info(f"Message sent to Zalo chat_id={msg.user_id}, result={send_result}")
+            await record_bot_chat_message(
+                channel="zalo",
+                chat_id=msg.user_id,
+                direction="outbound",
+                sender_type="bot",
+                message_text=response_text,
+                sender_name="Bot AI",
+            )
         except Exception as e:
             logger.error(f"Error processing Zalo message: {str(e)}")
 
