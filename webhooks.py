@@ -208,6 +208,24 @@ async def record_bot_chat_message(
         return {"ok": False, "is_human_takeover": False}
 
 
+SUPPORT_APP_RE = re.compile(r"(?:/start\s+)?(?:support_app_|app_)(\d+)", re.IGNORECASE)
+
+
+async def fetch_application_context(app_id: int) -> dict | None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{bot_link_api_base_url}/api/v1/internal/bot-chat/applications/{app_id}",
+                headers=_bot_link_headers(),
+            )
+            if response.status_code == 200:
+                return response.json()
+    except Exception as exc:
+        logger.warning(f"Failed to fetch application #{app_id}: {exc}")
+    return None
+
+
+
 
 def bot_link_instruction_text() -> str:
     return (
@@ -675,6 +693,39 @@ async def process_with_ai(msg: IncomingMessage):
                 "Tạm dừng phản hồi bot AI tự động."
             )
             return
+
+        # ── Xử lý Yêu cầu Tư vấn Ngữ cảnh cho Đơn ứng tuyển cụ thể ──
+        app_match = SUPPORT_APP_RE.search(msg.text_content.strip())
+        if app_match:
+            app_id = int(app_match.group(1))
+            logger.info(f"Detected consultant support request for application #{app_id} from {channel}:{msg.user_id}")
+            app_data = await fetch_application_context(app_id)
+            if app_data:
+                job_title = app_data.get("job_title") or "Vị trí đã ứng tuyển"
+                company_name = app_data.get("company_name") or "Nhà tuyển dụng"
+                cand_name = (linked_user.get("name") if linked_user else None) or app_data.get("candidate_name") or "bạn"
+
+                consultant_greeting = (
+                    f"👋 Chào {cand_name}!\n\n"
+                    f"Tôi là **Tư vấn viên AI** từ Bot Tìm Việc. Tôi thấy bạn đang cần hỗ trợ về đơn ứng tuyển vị trí:\n"
+                    f"🎯 **{job_title}**\n"
+                    f"🏢 **{company_name}** (Mã đơn: #{app_id})\n\n"
+                    f"Bạn đang cần tư vấn về vấn đề gì cho đơn ứng tuyển này?\n"
+                    f"• 1. Tiến độ duyệt hồ sơ & xem thư của Nhà tuyển dụng\n"
+                    f"• 2. Câu hỏi phỏng vấn thường gặp cho vị trí này\n"
+                    f"• 3. Hoặc yêu cầu Chuyên viên nhân sự (Người thật) hỗ trợ trực tiếp\n\n"
+                    f"Hãy nhắn trực tiếp câu hỏi của bạn tại đây để tôi hỗ trợ nhé!"
+                )
+                await send_platform_text(platform=msg.platform, chat_id=msg.user_id, text=consultant_greeting)
+                await record_bot_chat_message(
+                    channel=channel,
+                    chat_id=msg.user_id,
+                    direction="outbound",
+                    sender_type="bot",
+                    message_text=consultant_greeting,
+                    sender_name="Tư vấn viên AI",
+                )
+                return
 
     if msg.platform == "tele":
         try:
